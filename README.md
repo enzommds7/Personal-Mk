@@ -19,3 +19,4 @@ Este projeto foi construído **sem o uso de frameworks pesados** para garantir o
 Licença
 
 Este projeto é para uso pessoal e estudo. Sinta-se à vontade para clonar e adaptar para o seu dia a dia!
+tmj!
