@@ -1,0 +1,17 @@
+{
+  "name": "Minha Agenda",
+  "short_name": "Agenda",
+  "description": "Diário e agenda pessoal com sync na nuvem",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#F5F1EB",
+  "theme_color": "#F5F1EB",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
