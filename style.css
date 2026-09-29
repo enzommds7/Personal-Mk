@@ -328,9 +328,20 @@ body {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
   transition: transform var(--transition), background var(--transition);
   z-index: 50;
+}
+
+#sidebar::-webkit-scrollbar {
+  width: 3px;
+}
+
+#sidebar::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
 }
 
 :root.light #sidebar {
@@ -341,6 +352,12 @@ body {
   padding: 16px 14px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: inherit;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
 }
 
 .logo-row {
@@ -701,18 +718,10 @@ body {
 
 #daysList {
   flex: 1;
-  overflow-y: auto;
-  padding: 0 5px 8px;
+  padding: 0 5px 80px;
 }
 
-#daysList::-webkit-scrollbar {
-  width: 3px;
-}
 
-#daysList::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 2px;
-}
 
 .day-item {
   display: flex;
