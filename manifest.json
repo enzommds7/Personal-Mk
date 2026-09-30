@@ -1,6 +1,6 @@
 {
-  "name": "PersonalMK",
-  "short_name": "PersonalMK",
+  "name": "PersonalMk",
+  "short_name": "PersonalMk",
   "description": "Pessoal com sync na nuvem",
   "start_url": "./index.html",
   "display": "standalone",
