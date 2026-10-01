@@ -166,8 +166,13 @@ if ($('geminiApiKeyInput')) {
 if ($('tb-ai')) {
   $('tb-ai').addEventListener('click', () => {
     if (!geminiApiKey) {
-      showToast('Por favor, configure sua Chave da API Gemini nas configurações.', true);
-      $('settings-overlay').classList.add('show');
+      // Pulse the settings button to hint where to configure
+      const sBtn = $('settingsBtn');
+      sBtn.style.outline = '2px solid rgba(231,111,81,0.8)';
+      sBtn.style.outlineOffset = '2px';
+      setTimeout(() => { sBtn.style.outline = ''; sBtn.style.outlineOffset = ''; }, 2000);
+      showToast('Configure sua Chave Gemini nas ⚙️ Configurações.', true);
+      openSettings();
       return;
     }
     $('ai-overlay').classList.add('show');
@@ -244,24 +249,22 @@ if ($('aiBtnImprove')) {
 
     setAILoading('aiBtnImprove', true, 'Melhorar Texto Selecionado');
 
-    const prompt = `Melhore o seguinte texto corrigindo erros gramaticais e deixando-o mais claro e profissional. Mantenha a mesma linguagem e tom original. Responda apenas com o texto melhorado:\n\n${text}`;
-
-    const result = await callGemini(prompt);
-
-    if (result) {
-      if (isSelection) {
-        // Replace selection
-        document.execCommand('insertText', false, result);
-      } else {
-        // Replace all text (keep basic formatting if possible, though innerText loses HTML)
-        $('editor').innerText = result;
+    try {
+      const prompt = `Melhore o seguinte texto corrigindo erros gramaticais e deixando-o mais claro e profissional. Mantenha a mesma linguagem e tom original. Responda apenas com o texto melhorado:\n\n${text}`;
+      const result = await callGemini(prompt);
+      if (result) {
+        if (isSelection) {
+          document.execCommand('insertText', false, result);
+        } else {
+          $('editor').innerText = result;
+        }
+        doSave();
+        updateWC();
+        showToast('Texto melhorado!', false);
       }
-      doSave();
-      updateWC();
-      showToast('Texto melhorado com sucesso!', false);
+    } finally {
+      setAILoading('aiBtnImprove', false, 'Melhorar Texto Selecionado');
     }
-
-    setAILoading('aiBtnImprove', false, 'Melhorar Texto Selecionado');
   });
 }
 
@@ -273,21 +276,20 @@ if ($('aiBtnSummarize')) {
 
     setAILoading('aiBtnSummarize', true, 'Resumir o Dia');
 
-    const prompt = `Resuma os pontos principais do seguinte diário/anotação em um formato de lista com tópicos markdown (bullet points). Seja conciso. Anotação:\n\n${text}`;
-
-    const result = await callGemini(prompt);
-
-    if (result) {
-      let htmlResult = '<br><br><strong> Resumo da IA:</strong><br>';
-      htmlResult += result.replace(/\n/g, '<br>');
-      $('editor').innerHTML += htmlResult;
-
-      doSave();
-      updateWC();
-      showToast('Resumo gerado!', false);
+    try {
+      const prompt = `Resuma os pontos principais do seguinte diário/anotação em um formato de lista com tópicos markdown (bullet points). Seja conciso. Anotação:\n\n${text}`;
+      const result = await callGemini(prompt);
+      if (result) {
+        let htmlResult = '<br><br><strong>Resumo da IA:</strong><br>';
+        htmlResult += result.replace(/\n/g, '<br>');
+        $('editor').innerHTML += htmlResult;
+        doSave();
+        updateWC();
+        showToast('Resumo gerado!', false);
+      }
+    } finally {
+      setAILoading('aiBtnSummarize', false, 'Resumir o Dia');
     }
-
-    setAILoading('aiBtnSummarize', false, 'Resumir o Dia');
   });
 }
 if ($('aiBtnTags')) {
@@ -297,21 +299,19 @@ if ($('aiBtnTags')) {
 
     setAILoading('aiBtnTags', true, 'Gerar Auto-Tags');
 
-    const prompt = `Leia a anotação abaixo e gere até 5 palavras-chave (tags) relevantes. Responda APENAS com as tags separadas por vírgula, sem usar o símbolo #. Exemplo: estudo, trabalho, reunião.\n\n${text}`;
-
-    const result = await callGemini(prompt);
-
-    if (result) {
-      const newTags = result.split(',').map(t => t.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')).filter(t => t);
-      newTags.forEach(t => {
-        if (!currentTags.includes(t)) currentTags.push(t);
-      });
-      renderTagsInEditor();
-      doSave();
-      showToast('Tags geradas!', false);
+    try {
+      const prompt = `Leia a anotação abaixo e gere até 5 palavras-chave (tags) relevantes. Responda APENAS com as tags separadas por vírgula, sem usar o símbolo #. Exemplo: estudo, trabalho, reunião.\n\n${text}`;
+      const result = await callGemini(prompt);
+      if (result) {
+        const newTags = result.split(',').map(t => t.trim().toLowerCase().replace(/[^a-z0-9_\-àáâãéêíóôõúç]/gi, '')).filter(t => t.length > 0);
+        newTags.forEach(t => { if (!currentTags.includes(t)) currentTags.push(t); });
+        renderTagsInEditor();
+        doSave();
+        showToast(`${newTags.length} tag(s) gerada(s)!`, false);
+      }
+    } finally {
+      setAILoading('aiBtnTags', false, 'Gerar Auto-Tags');
     }
-
-    setAILoading('aiBtnTags', false, 'Gerar Auto-Tags');
   });
 }
 
