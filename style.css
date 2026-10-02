@@ -1489,10 +1489,8 @@ body {
 }
 
 .welcome-icon {
-  font-size: 50px;
-  margin-bottom: 16px;
-  animation: float 3s ease-in-out infinite;
-  filter: drop-shadow(0 0 18px rgba(139, 92, 246, 0.5));
+  margin-bottom: 20px;
+  animation: float 4s ease-in-out infinite;
 }
 
 @keyframes float {
