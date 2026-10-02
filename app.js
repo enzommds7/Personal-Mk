@@ -320,7 +320,7 @@ function openSettings() {
   const isCloud = !!(currentUser && !currentUser.isAnonymous && FB_ON);
   $('settingsAccountDesc').textContent = isCloud
     ? `Conectado: ${currentUser.email}`
-    : (FB_ON ? 'Modo offline (sem conta)' : 'Firebase nao configurado');
+    : (FB_ON ? 'Modo offline (sem conta)' : 'Firebase não configurado');
   $('settingsAuthBtn').textContent = isCloud ? 'Sair' : 'Entrar com conta';
   $('settingsAuthBtn').onclick = () => { closeSettings(); isCloud ? doLogout() : showAuthScreen(); };
   const d = loadLocal(); const days = Object.keys(d).length;
@@ -382,7 +382,7 @@ async function doAuth() {
   const btn = $('authSubmitBtn');
 
   if (!email || !pass) { errEl.textContent = 'Preencha email e senha.'; return; }
-  if (authMode === 'register' && pass !== confirm) { errEl.textContent = 'As senhas nao coincidem.'; return; }
+  if (authMode === 'register' && pass !== confirm) { errEl.textContent = 'As senhas não coincidem.'; return; }
   if (pass.length < 6) { errEl.textContent = 'Senha deve ter ao menos 6 caracteres.'; return; }
 
   btn.disabled = true;
@@ -401,7 +401,7 @@ async function doAuth() {
       'auth/user-not-found': 'Email não encontrado.',
       'auth/wrong-password': 'Senha tá errada, bobão.',
       'auth/email-already-in-use': 'Email ja cadastrado.',
-      'auth/invalid-email': 'Email invalido.',
+      'auth/invalid-email': 'Email inválido.',
       'auth/too-many-requests': 'Muitas tentativas. Tente mais tarde.',
       'auth/network-request-failed': 'Sem conexão seu pobre. Tente o modo offline.',
     };
@@ -536,12 +536,12 @@ function renderSidebar(filter) {
     return fmtFull(k).toLowerCase().includes(q) || toPlain(day.content || '').toLowerCase().includes(q);
   });
   if (!filtered.length) {
-    $('daysList').innerHTML = `<div class="empty-msg">${q || activeTagFilter ? 'Nenhum resultado.' : 'Nenhuma anotacao ainda.<br>Clique em <b>Nova Anotacao</b>.'}</div>`;
+    $('daysList').innerHTML = `<div class="empty-msg">${q || activeTagFilter ? 'Nenhum resultado.' : 'Nenhuma anotação ainda.<br>Clique em <b>Nova Anotação</b>.'}</div>`;
     return;
   }
   $('daysList').innerHTML = filtered.map(k => {
     const d = data[k]; const c = d.content || ''; const tags = d.tags || [];
-    const preview = toPlain(c).slice(0, 52).trim() || 'Sem conteudo';
+    const preview = toPlain(c).slice(0, 52).trim() || 'Sem conteúdo';
     const ac = k === activeTab ? ' active' : ''; const hc = c.trim().length ? ' has-content' : '';
     const chips = tags.slice(0, 2).map(t => { return `<span class="day-tag-chip">#${esc(t)}</span>`; }).join('');
     return `<div class="day-item${ac}${hc}" data-key="${k}" tabindex="0">
@@ -775,11 +775,11 @@ $('editor').addEventListener('keydown', e => {
 function createOrOpen(key) {
   const existed = allKeys().includes(key);
   openTab(key);
-  if (!existed) toast('Nova anotacao criada!', '');
+  if (!existed) toast('Nova anotação criada!', '');
 }
 function pickDateModal() {
   openModal({
-    title: 'Nova Anotacao', body: 'Escolha a data:',
+    title: 'Nova Anotação', body: 'Escolha a data:',
     extra: `<div><input type="date" class="date-modal-input" id="datePickInput" value="${todayKey()}"/></div>`,
     actions: [
       { label: 'Cancelar', cls: 'btn-cancel' },
@@ -792,8 +792,8 @@ $('welcomeBtn').addEventListener('click', () => createOrOpen(todayKey()));
 /* ────── Delete ────── */
 function confirmDelete(key) {
   openModal({
-    title: 'Excluir anotacao',
-    body: `Excluir "${fmtShort(key)}"? Nao pode ser desfeito.`,
+    title: 'Excluir anotação',
+    body: `Excluir "${fmtShort(key)}"? Não pode ser desfeito.`,
     actions: [
       { label: 'Cancelar', cls: 'btn-cancel' },
       {
@@ -801,7 +801,7 @@ function confirmDelete(key) {
           await delDay(key);
           if (openTabs.includes(key)) closeTab(key);
           else { renderSidebar($('searchInput').value); renderCalendar(); }
-          renderTagFilterBar(); toast('Anotacao excluida.', '');
+          renderTagFilterBar(); toast('Anotação excluída.', '');
         }
       }
     ]
@@ -861,7 +861,7 @@ $('restoreFileInput').addEventListener('change', e => {
           }
         ]
       });
-    } catch (e) { toast('Arquivo invalido.', ''); }
+    } catch (e) { toast('Arquivo inválido.', ''); }
   };
   reader.readAsText(file); e.target.value = '';
 });
