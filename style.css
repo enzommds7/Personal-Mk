@@ -219,9 +219,8 @@ body {
 .auth-btn {
   width: 100%;
   padding: 13px;
-  background: var(--bg-surface-glass);
-  border: 1px solid var(--border);
-  border: none;
+  background: var(--bg-surface);
+  border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 14px;
@@ -233,6 +232,12 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
+}
+
+:root.light .auth-btn {
+  background: #1A1A1A;
+  border-color: #1A1A1A;
+  color: #F2F2F7;
 }
 
 .auth-btn:hover {
