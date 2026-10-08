@@ -171,7 +171,7 @@ if ($('tb-ai')) {
       sBtn.style.outline = '2px solid rgba(231,111,81,0.8)';
       sBtn.style.outlineOffset = '2px';
       setTimeout(() => { sBtn.style.outline = ''; sBtn.style.outlineOffset = ''; }, 2000);
-      showToast('Configure sua Chave Gemini nas ⚙️ Configurações.', true);
+      showToast('Configure sua Chave Gemini na Configurações (Engrenagem ali em cima).', true);
       openSettings();
       return;
     }
@@ -400,7 +400,7 @@ async function doAuth() {
     const msgs = {
       'auth/user-not-found': 'Email não encontrado.',
       'auth/wrong-password': 'Senha tá errada, bobão.',
-      'auth/email-already-in-use': 'Email ja cadastrado.',
+      'auth/email-already-in-use': 'Email já cadastrado.',
       'auth/invalid-email': 'Email inválido.',
       'auth/too-many-requests': 'Muitas tentativas. Tente mais tarde.',
       'auth/network-request-failed': 'Sem conexão seu pobre. Tente o modo offline.',
@@ -437,7 +437,7 @@ function doLogout() {
 $('logoutBtn').addEventListener('click', () => {
   openModal({
     title: 'Sair da conta',
-    body: 'Deseja sair? Seus dados continuarao salvos.',
+    body: 'Deseja sair? Seus dados continuarão salvos.',
     actions: [
       { label: 'Cancelar', cls: 'btn-cancel' },
       { label: 'Sair', cls: 'btn-danger', cb: doLogout }
@@ -661,7 +661,6 @@ function closeTab(key) {
 }
 function showWelcome() { $('welcome').style.display = 'flex'; $('editorPane').style.display = 'none'; }
 
-/* ────── Editor ────── */
 let currentTags = [];
 
 function showEditor(key) {
