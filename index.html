@@ -218,7 +218,7 @@
               <div id="currentDaySubtitle">-</div>
             </div>
             <div class="editor-actions">
-              <div id="saveStatus"><span class="status-dot"></span><span id="saveStatusText">Salvo</span></div>
+              <div id="saveStatus"><svg id="saveStatusIcon" class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><span id="saveStatusText">Salvo</span></div>
               <button class="icon-btn glass-btn" id="exportBtn">
                 <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -240,6 +240,7 @@
 
             <div class="editor-inner-tabs">
               <button class="inner-tab active" id="tabText">Texto</button>
+              <button class="inner-tab" id="tabChecklist">Tarefas</button>
               <button class="inner-tab" id="tabGallery">Galeria</button>
             </div>
           </div>
@@ -298,6 +299,22 @@
           </div>
           <div class="gallery-grid" id="galleryGrid"></div>
         </div>
+        
+        <div id="checklistPane" style="display:none;">
+          <div class="checklist-header">
+            <div class="checklist-progress-wrap">
+              <div class="checklist-progress-fill" id="checklistProgress"></div>
+            </div>
+            <span id="checklistProgressText">0% concluído</span>
+          </div>
+          <div id="checklistContainer">
+            <!-- Rendered by JS -->
+          </div>
+          <div class="checklist-add-wrap">
+            <input type="text" id="newChecklistInput" placeholder="+ Nova tarefa... (pressione Enter)" autocomplete="off" />
+          </div>
+        </div>
+        
         <div id="wordCount">
           <span id="wc-words">0 palavras</span>
           <span id="wc-chars">0 caracteres</span>

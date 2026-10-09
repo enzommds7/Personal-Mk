@@ -31,6 +31,11 @@ function todayKey() {
   const d = new Date();
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
+function yesterdayKey() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 function keyToDate(k) { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); }
 function fmtFull(k) { return keyToDate(k).toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
 function fmtShort(k) {
@@ -49,11 +54,18 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 function localKey() { return currentUser ? `${SK}_${currentUser.uid}` : SK; }
 function loadLocal() { try { return JSON.parse(localStorage.getItem(localKey())) || {}; } catch { return {}; } }
 function saveLocal(d) { localStorage.setItem(localKey(), JSON.stringify(d)); }
-function localGetDay(k) { return loadLocal()[k] || { content: '', updatedAt: null, tags: [], images: [] }; }
-function localSetDay(k, content, tags, images) {
+function localGetDay(k) { return loadLocal()[k] || { content: '', updatedAt: null, tags: [], images: [], checklist: [] }; }
+function localSetDay(k, content, tags, images, checklist) {
   const d = loadLocal();
   const existingImages = d[k] && Array.isArray(d[k].images) ? d[k].images : [];
-  d[k] = { content, updatedAt: new Date().toISOString(), tags: tags || [], images: images !== undefined ? images : existingImages };
+  const existingChecklist = d[k] && Array.isArray(d[k].checklist) ? d[k].checklist : [];
+  d[k] = { 
+    content, 
+    updatedAt: new Date().toISOString(), 
+    tags: tags || [], 
+    images: images !== undefined ? images : existingImages,
+    checklist: checklist !== undefined ? checklist : existingChecklist
+  };
   saveLocal(d);
 }
 function localDelDay(k) { const d = loadLocal(); delete d[k]; saveLocal(d); }
@@ -62,10 +74,16 @@ function allKeys() { return Object.keys(loadLocal()).sort().reverse(); }
 /* ────── Firestore Sync ────── */
 function userDaysRef() { return db.collection('users').doc(currentUser.uid).collection('days'); }
 
-async function cloudSaveDay(key, content, tags, images) {
+async function cloudSaveDay(key, content, tags, images, checklist) {
   if (!db || !currentUser) return;
   try {
-    await userDaysRef().doc(key).set({ content, tags: tags || [], images: images || [], updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await userDaysRef().doc(key).set({ 
+      content, 
+      tags: tags || [], 
+      images: images || [], 
+      checklist: checklist || [], 
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
+    }, { merge: true });
     setSyncStatus('synced');
   } catch (e) { setSyncStatus('offline'); }
 }
@@ -95,9 +113,9 @@ function setSyncStatus(state) {
 
 /* ────── Combined get/set (local + cloud) ────── */
 async function getDay(k) { return localGetDay(k); }
-async function setDay(k, content, tags, images) {
-  localSetDay(k, content, tags, images);
-  if (currentUser) cloudSaveDay(k, content, tags, images);
+async function setDay(k, content, tags, images, checklist) {
+  localSetDay(k, content, tags, images, checklist);
+  if (currentUser) cloudSaveDay(k, content, tags, images, checklist);
 }
 async function delDay(k) {
   localDelDay(k);
@@ -130,7 +148,8 @@ function renderTagChip(name, withDel) {
 
 /* ────── Toast ────── */
 let toastT;
-function toast(msg, icon = '✓') { $('toast-msg').textContent = msg; $('toast-icon').innerHTML = icon; $('toast').classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => $('toast').classList.remove('show'), 2800); }
+function toast(msg, icon = '✓') { $('toast-msg').textContent = msg; $('toast-icon').innerHTML = icon; $('toast').classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => { $('toast').classList.remove('show'); setTimeout(() => $('toast').classList.remove('error'), 300); }, 2800); }
+function showToast(msg, isError = false) { if(isError) $('toast').classList.add('error'); else $('toast').classList.remove('error'); toast(msg, isError ? '!' : '✓'); }
 
 /* ────── Modal ────── */
 function openModal({ title, body = '', extra = '', actions }) {
@@ -662,6 +681,7 @@ function closeTab(key) {
 function showWelcome() { $('welcome').style.display = 'flex'; $('editorPane').style.display = 'none'; }
 
 let currentTags = [];
+let currentChecklist = [];
 
 function showEditor(key) {
   $('welcome').style.display = 'none'; $('editorPane').style.display = 'flex';
@@ -671,12 +691,25 @@ function showEditor(key) {
   const upd = day.updatedAt ? new Date(day.updatedAt).toLocaleString('pt-BR') : null;
   $('currentDaySubtitle').textContent = upd ? `Ultima edicao: ${upd}` : 'Nenhuma edicao ainda';
   currentTags = [...(day.tags || [])];
-  renderTagsInEditor(); setSave('saved'); updateWC(); $('editor').focus();
+  currentChecklist = [...(day.checklist || [])];
+  renderTagsInEditor();
+  if($('tabChecklist') && $('tabChecklist').classList.contains('active')) {
+    renderChecklist();
+  }
+  setSave('saved'); updateWC(); $('editor').focus();
 }
 function setSave(s) {
   $('saveStatus').className = '';
-  if (s === 'saved') { $('saveStatus').classList.add('saved'); $('saveStatusText').textContent = 'Salvo'; }
-  else { $('saveStatus').classList.add('saving'); $('saveStatusText').textContent = 'Salvando...'; }
+  const icon = $('saveStatusIcon');
+  if (s === 'saved') {
+    $('saveStatus').classList.add('saved');
+    $('saveStatusText').textContent = 'Salvo';
+    if (icon) icon.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
+  } else {
+    $('saveStatus').classList.add('saving');
+    $('saveStatusText').textContent = 'Salvando...';
+    if (icon) icon.innerHTML = '<path d="M21 12a9 9 0 1 1-6.219-8.56"></path>';
+  }
 }
 function updateWC() {
   const t = toPlain($('editor').innerHTML); const w = cWords(t); const c = t.length;
@@ -685,7 +718,8 @@ function updateWC() {
 }
 async function saveCurrent() {
   if (!activeTab) return;
-  const day = localGetDay(activeTab); await setDay(activeTab, $('editor').innerHTML, currentTags, day.images);
+  const day = localGetDay(activeTab); 
+  await setDay(activeTab, $('editor').innerHTML, currentTags, day.images, currentChecklist);
   setSave('saved'); renderSidebar($('searchInput').value); renderTagFilterBar(); renderCalendar();
   $('currentDaySubtitle').textContent = `Ultima edicao: ${new Date().toLocaleString('pt-BR')}`;
 }
@@ -951,18 +985,27 @@ async function compressImage(file, maxDim = 1600, quality = 0.7) {
   });
 }
 
-/* ────── Gallery UI ────── */
-$('tabText').addEventListener('click', () => {
-  $('tabText').classList.add('active'); $('tabGallery').classList.remove('active');
-  $('toolbar').style.display = 'flex'; $('editorWrap').style.display = 'block'; $('wordCount').style.display = 'flex';
-  $('galleryPane').style.display = 'none';
-});
-$('tabGallery').addEventListener('click', () => {
-  $('tabGallery').classList.add('active'); $('tabText').classList.remove('active');
-  $('toolbar').style.display = 'none'; $('editorWrap').style.display = 'none'; $('wordCount').style.display = 'none';
-  $('galleryPane').style.display = 'block';
-  renderGallery();
-});
+/* ────── UI Tabs ────── */
+function switchInnerTab(tab) {
+  $('tabText').classList.toggle('active', tab === 'text');
+  $('tabChecklist').classList.toggle('active', tab === 'checklist');
+  $('tabGallery').classList.toggle('active', tab === 'gallery');
+
+  $('toolbar').style.display = tab === 'text' ? 'flex' : 'none';
+  $('editorWrap').style.display = tab === 'text' ? 'block' : 'none';
+  $('wordCount').style.display = tab === 'text' ? 'flex' : 'none';
+  
+  $('checklistPane').style.display = tab === 'checklist' ? 'flex' : 'none';
+  
+  $('galleryPane').style.display = tab === 'gallery' ? 'block' : 'none';
+  
+  if (tab === 'gallery') renderGallery();
+  if (tab === 'checklist') renderChecklist();
+}
+
+$('tabText').addEventListener('click', () => switchInnerTab('text'));
+$('tabChecklist').addEventListener('click', () => switchInnerTab('checklist'));
+$('tabGallery').addEventListener('click', () => switchInnerTab('gallery'));
 
 $('uploadImgBtn').addEventListener('click', () => $('imgUploadInput').click());
 $('imgUploadInput').addEventListener('change', async e => {
@@ -1098,6 +1141,62 @@ window.addEventListener('paste', async (e) => {
 $('lbClose').addEventListener('click', () => $('lightbox').classList.remove('show'));
 $('lightbox').addEventListener('click', e => { if (e.target === $('lightbox')) $('lightbox').classList.remove('show'); });
 
+/* ────── Checklist UI ────── */
+function renderChecklist() {
+  if (!activeTab) return;
+  const container = $('checklistContainer');
+  container.innerHTML = '';
+  
+  let doneCount = 0;
+  currentChecklist.forEach((item, index) => {
+    if (item.done) doneCount++;
+    const div = document.createElement('div');
+    div.className = `check-item ${item.done ? 'done' : ''}`;
+    div.innerHTML = `
+      <div class="check-box" data-idx="${index}">${item.done ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}</div>
+      <div class="check-text">${esc(item.text)}</div>
+      <button class="check-del" data-idx="${index}">&#x00D7;</button>
+    `;
+    container.appendChild(div);
+  });
+  
+  const pct = currentChecklist.length ? Math.round((doneCount / currentChecklist.length) * 100) : 0;
+  $('checklistProgress').style.width = pct + '%';
+  $('checklistProgressText').textContent = `${pct}% concluído`;
+  
+  // Attach events
+  container.querySelectorAll('.check-box').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = el.getAttribute('data-idx');
+      currentChecklist[idx].done = !currentChecklist[idx].done;
+      saveCurrent();
+      renderChecklist();
+    });
+  });
+  container.querySelectorAll('.check-del').forEach(el => {
+    el.addEventListener('click', () => {
+      const idx = el.getAttribute('data-idx');
+      currentChecklist.splice(idx, 1);
+      saveCurrent();
+      renderChecklist();
+    });
+  });
+}
+
+if ($('newChecklistInput')) {
+  $('newChecklistInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const val = e.target.value.trim();
+      if (val) {
+        currentChecklist.push({ text: val, done: false });
+        e.target.value = '';
+        saveCurrent();
+        renderChecklist();
+      }
+    }
+  });
+}
+
 /* ────── App init (after auth) ────── */
 async function initApp() {
   updateUserBar();
@@ -1123,6 +1222,14 @@ async function initApp() {
   else showWelcome();
   if (activeTab) {
     const d = keyToDate(activeTab); calYear = d.getFullYear(); calMonth = d.getMonth(); renderCalendar();
+  }
+
+  const yk = yesterdayKey();
+  const yd = localGetDay(yk);
+  const yc = yd.checklist || [];
+  const missed = yc.filter(c => !c.done).length;
+  if (missed > 0) {
+    setTimeout(() => showToast(`Você deixou ${missed} tarefa(s) pendente(s) ontem.`, true), 1500);
   }
 }
 
