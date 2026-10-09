@@ -1148,13 +1148,22 @@ function renderChecklist() {
   container.innerHTML = '';
   
   let doneCount = 0;
+  // Sort by time if available
+  currentChecklist.sort((a, b) => {
+    if (!a.time) return 1;
+    if (!b.time) return -1;
+    return a.time.localeCompare(b.time);
+  });
+
   currentChecklist.forEach((item, index) => {
     if (item.done) doneCount++;
     const div = document.createElement('div');
     div.className = `check-item ${item.done ? 'done' : ''}`;
+    const timeHTML = item.time ? `<div class="check-time">${esc(item.time)}</div>` : '';
     div.innerHTML = `
       <div class="check-box" data-idx="${index}">${item.done ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}</div>
       <div class="check-text">${esc(item.text)}</div>
+      ${timeHTML}
       <button class="check-del" data-idx="${index}">&#x00D7;</button>
     `;
     container.appendChild(div);
@@ -1187,15 +1196,41 @@ if ($('newChecklistInput')) {
   $('newChecklistInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') {
       const val = e.target.value.trim();
+      const tVal = $('newChecklistTime') ? $('newChecklistTime').value : '';
       if (val) {
-        currentChecklist.push({ text: val, done: false });
+        currentChecklist.push({ text: val, time: tVal, done: false, notified: false });
         e.target.value = '';
+        if ($('newChecklistTime')) $('newChecklistTime').value = '';
         saveCurrent();
         renderChecklist();
       }
     }
   });
 }
+
+// Reminder checker every minute
+setInterval(() => {
+  if (!activeTab || activeTab !== todayKey() || !currentChecklist) return;
+  const now = new Date();
+  const currentMins = now.getHours() * 60 + now.getMinutes();
+
+  let modified = false;
+  currentChecklist.forEach((item) => {
+    if (!item.done && item.time && !item.notified) {
+      const [hStr, mStr] = item.time.split(':');
+      if (hStr && mStr) {
+        const taskMins = parseInt(hStr, 10) * 60 + parseInt(mStr, 10);
+        const diff = taskMins - currentMins;
+        if (diff > 0 && diff <= 30) {
+          toast(`Lembrete: "${item.text}" às ${item.time}`, '⏰');
+          item.notified = true;
+          modified = true;
+        }
+      }
+    }
+  });
+  if (modified) saveCurrent();
+}, 60000);
 
 /* ────── App init (after auth) ────── */
 async function initApp() {

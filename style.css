@@ -1985,8 +1985,13 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   opacity: 1;
 }
 
-.checklist-add-wrap input {
-  width: 100%;
+.checklist-add-wrap {
+  display: flex;
+  gap: 12px;
+}
+
+.checklist-add-wrap input[type="text"] {
+  flex: 1;
   padding: 14px 16px;
   background: transparent;
   border: 1px dashed var(--border);
@@ -1997,7 +2002,40 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   transition: border-color 0.2s;
 }
 
-.checklist-add-wrap input:focus {
+.checklist-add-wrap input[type="text"]:focus {
   border-color: var(--text-primary);
   border-style: solid;
+}
+
+.checklist-time-input {
+  width: 110px;
+  padding: 14px 16px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+  font-family: inherit;
+  color-scheme: dark;
+}
+
+:root.light .checklist-time-input {
+  color-scheme: light;
+}
+
+.checklist-time-input:focus {
+  border-color: var(--text-primary);
+  border-style: solid;
+}
+
+.check-time {
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  letter-spacing: 0.5px;
 }
