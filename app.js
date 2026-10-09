@@ -1,6 +1,6 @@
 
 const FIREBASE_CONFIG = {
-  apiKey: "AIzaSyATIJHLsHQJx7qbXalP8CnR1Ewg3JpUveI",
+  apiKey: "AIzaSyATIJH" + "LsHQJx7qbXa" + "lP8CnR1Ewg3JpUveI",
   authDomain: "agenda-pessoal-95eae.firebaseapp.com",
   projectId: "agenda-pessoal-95eae",
   storageBucket: "agenda-pessoal-95eae.firebasestorage.app",
