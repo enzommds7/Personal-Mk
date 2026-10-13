@@ -435,6 +435,8 @@ function openSettings() {
   const chars = Object.values(d).reduce((a, x) => a + toPlain(x.content || '').length, 0);
   $('dataStats').textContent = `${days} dia(s), ~${chars} caracteres`;
   updateThemeBtn();
+  updateSpotifySettings();
+  updateNotifSettings();
   $('settings-overlay').classList.add('show');
 }
 function closeSettings() { $('settings-overlay').classList.remove('show'); }
@@ -1445,6 +1447,8 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if ($('quicksearch-overlay') && $('quicksearch-overlay').classList.contains('show')) {
       closeQuickSearch();
+    } else if ($('spotify-overlay') && $('spotify-overlay').classList.contains('show')) {
+      closeSpotifyModal();
     } else if ($('ai-overlay') && $('ai-overlay').classList.contains('show')) {
       $('ai-overlay').classList.remove('show');
     } else if ($('settings-overlay') && $('settings-overlay').classList.contains('show')) {
@@ -1751,29 +1755,436 @@ if ($('newChecklistInput')) {
   });
 }
 
-// Reminder checker every minute
-setInterval(() => {
-  if (!activeTab || activeTab !== todayKey() || !currentChecklist) return;
-  const now = new Date();
-  const currentMins = now.getHours() * 60 + now.getMinutes();
+/* ══════════ NOTIFICAÇÕES ══════════ */
+const SK_NOTIF_DISMISS = 'pmk_notif_dismissed_at';
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const notifSupported = () => 'Notification' in window;
 
+async function sendNotification(title, body, { url = '', tag } = {}) {
+  if (!notifSupported() || Notification.permission !== 'granted') return false;
+  const opts = { body, icon: 'icon.svg', badge: 'icon.svg', data: { url }, vibrate: [120, 60, 120] };
+  if (tag) opts.tag = tag;
+  try {
+    // No Android, "new Notification()" não funciona: precisa passar pelo Service Worker
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (reg) { await reg.showNotification(title, opts); return true; }
+    }
+    const n = new Notification(title, opts);
+    n.onclick = () => { window.focus(); if (url) window.open(url, '_blank'); n.close(); };
+    return true;
+  } catch (e) {
+    console.warn('Falha ao notificar:', e);
+    return false;
+  }
+}
+
+async function requestNotifPermission() {
+  hideNotifBanner();
+  if (!notifSupported()) {
+    showToast(isIOS()
+      ? 'No iPhone: toque em Compartilhar → "Adicionar à Tela de Início" e abra o app por lá para ativar.'
+      : 'Seu navegador não suporta notificações.', true);
+    return;
+  }
+  const res = await Notification.requestPermission();
+  if (res === 'granted') {
+    showToast('Notificações ativadas!');
+    sendNotification('PersonalMk', 'Pronto! Seus lembretes vão chegar por aqui.', { tag: 'pmk-welcome' });
+  } else if (res === 'denied') {
+    showToast('Notificações bloqueadas. Libere nas configurações do navegador.', true);
+  }
+  updateNotifSettings();
+}
+
+function hideNotifBanner() { $('notifBanner')?.classList.remove('show'); }
+
+function maybeShowNotifBanner() {
+  const banner = $('notifBanner');
+  if (!banner) return;
+  const dismissed = +localStorage.getItem(SK_NOTIF_DISMISS) || 0;
+  if (Date.now() - dismissed < 3 * 24 * 3600 * 1000) return; // pergunta de novo só depois de 3 dias
+  const iosNotInstalled = isIOS() && !isStandalone();
+  if (notifSupported() && Notification.permission !== 'default') return;
+  if (!notifSupported() && !iosNotInstalled) return;
+
+  if (iosNotInstalled) {
+    banner.querySelector('.notif-banner-text span').textContent =
+      'No iPhone, adicione o PersonalMk à Tela de Início (Compartilhar → Adicionar à Tela de Início) para receber lembretes.';
+    $('notifBannerAllow').textContent = 'Como fazer';
+  }
+  setTimeout(() => {
+    if (!$('spotify-overlay')?.classList.contains('show')) banner.classList.add('show');
+  }, 1500);
+}
+
+function updateNotifSettings() {
+  const desc = $('settingsNotifDesc'), btn = $('settingsNotifBtn'), test = $('settingsNotifTestBtn');
+  if (!desc) return;
+  if (!notifSupported()) {
+    desc.textContent = isIOS() ? 'Adicione o app à Tela de Início para ativar' : 'Não suportado neste navegador';
+    btn.style.display = 'none'; test.style.display = 'none';
+    return;
+  }
+  const p = Notification.permission;
+  desc.textContent = p === 'granted' ? 'Ativadas: 30 min antes, na hora e música do dia'
+    : p === 'denied' ? 'Bloqueadas no navegador (libere nas configurações do site)'
+    : 'Desativadas';
+  btn.style.display = p === 'default' ? '' : 'none';
+  test.style.display = p === 'granted' ? '' : 'none';
+}
+
+$('notifBannerAllow')?.addEventListener('click', requestNotifPermission);
+$('notifBannerLater')?.addEventListener('click', () => {
+  localStorage.setItem(SK_NOTIF_DISMISS, Date.now());
+  hideNotifBanner();
+});
+$('settingsNotifBtn')?.addEventListener('click', requestNotifPermission);
+$('settingsNotifTestBtn')?.addEventListener('click', () => {
+  sendNotification('🔔 Teste do PersonalMk', 'Se você está vendo isso, as notificações estão funcionando!', { tag: 'pmk-test' });
+});
+
+/* ────── Lembretes: 30 min antes + na hora ────── */
+function timeToMins(t) {
+  const [h, m] = (t || '').split(':').map(Number);
+  return isNaN(h) || isNaN(m) ? null : h * 60 + m;
+}
+
+function checkReminders() {
+  const k = todayKey();
+  const isActive = activeTab === k;
+  // Funciona mesmo se o usuário estiver com outra anotação aberta
+  const list = isActive ? currentChecklist : (localGetDay(k).checklist || []);
+  if (!list || !list.length) return;
+
+  const now = new Date();
+  const cur = now.getHours() * 60 + now.getMinutes();
   let modified = false;
-  currentChecklist.forEach((item) => {
-    if (!item.done && item.time && !item.notified) {
-      const [hStr, mStr] = item.time.split(':');
-      if (hStr && mStr) {
-        const taskMins = parseInt(hStr, 10) * 60 + parseInt(mStr, 10);
-        const diff = taskMins - currentMins;
-        if (diff > 0 && diff <= 30) {
-          toast(`Lembrete: "${item.text}" às ${item.time}`, '⏰');
-          item.notified = true;
-          modified = true;
-        }
-      }
+
+  list.forEach(item => {
+    if (item.done || !item.time) return;
+    const t = timeToMins(item.time);
+    if (t === null) return;
+    const diff = t - cur;
+    const tagBase = `pmk-${k}-${item.time}-${item.text}`;
+
+    // `notified` é o campo antigo (versões anteriores) = aviso de 30 min já enviado
+    if (!item.n30 && !item.notified && diff > 0 && diff <= 30) {
+      item.n30 = true; item.notified = true; modified = true;
+      toast(`Em ${diff} min: "${item.text}" às ${item.time}`, '⏰');
+      sendNotification(`⏰ Em ${diff} min: ${item.text}`, `Seu compromisso começa às ${item.time}.`, { tag: tagBase + '-30' });
+    }
+
+    if (!item.nNow && diff <= 0 && diff > -10) {
+      item.nNow = true; item.n30 = true; item.notified = true; modified = true;
+      toast(`Chegou a hora: "${item.text}"`, '🔔');
+      sendNotification(`🔔 Chegou a hora: ${item.text}`, `Compromisso marcado para ${item.time}.`, { tag: tagBase + '-now' });
     }
   });
-  if (modified) saveCurrent();
-}, 60000);
+
+  if (!modified) return;
+  if (isActive) {
+    saveCurrent();
+  } else {
+    const d = localGetDay(k);
+    setDay(k, d.content, d.tags, d.images, list);
+  }
+}
+
+/* ══════════ SPOTIFY — MÚSICA DO DIA ══════════
+ * Para ativar o modo "baseado na conta":
+ * 1. Crie um app em https://developer.spotify.com/dashboard
+ * 2. Em "Redirect URIs" adicione a URL EXATA do site, ex: https://enzommds7.github.io/Personal-Mk/
+ *    (para testar local use http://127.0.0.1:PORTA/ — o Spotify não aceita mais "localhost")
+ * 3. Cole o Client ID abaixo. Ele é público, pode ficar no código (o fluxo PKCE não usa secret).
+ * Sem Client ID, o app usa a sugestão por dia da semana.
+ */
+const SPOTIFY_CLIENT_ID = '';
+const SPOTIFY_SCOPES = 'user-top-read user-read-recently-played';
+const SK_SP_TOKEN = 'pmk_spotify_token';
+const SK_SP_VERIFIER = 'pmk_spotify_verifier';
+const SK_SP_DAILY = 'pmk_spotify_daily';
+const SK_SP_SHOWN = 'pmk_spotify_popup_shown';
+const SPOTIFY_SVG = '<svg class="sp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>';
+const PLAY_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+
+// Sugestões por dia da semana (usadas sem login ou se a conta não tiver histórico)
+const WEEKDAY_VIBES = [
+  { day: 'domingo', mood: 'pra desacelerar', emoji: '☀️', picks: [['Garota de Ipanema', 'Tom Jobim'], ['Here Comes the Sun', 'The Beatles'], ['Trem-Bala', 'Ana Vilela'], ['Sunday Morning', 'Maroon 5']] },
+  { day: 'segunda-feira', mood: 'pra começar a semana com energia', emoji: '⚡', picks: [['Eye of the Tiger', 'Survivor'], ["Don't Stop Me Now", 'Queen'], ['Lose Yourself', 'Eminem'], ['Tempo Perdido', 'Legião Urbana']] },
+  { day: 'terça-feira', mood: 'pra manter o foco', emoji: '🎯', picks: [['Weightless', 'Marconi Union'], ['Clair de Lune', 'Claude Debussy'], ['Time', 'Hans Zimmer'], ['Intro', 'The xx']] },
+  { day: 'quarta-feira', mood: 'pra atravessar o meio da semana', emoji: '🌤️', picks: [['Happy', 'Pharrell Williams'], ['Mr. Blue Sky', 'Electric Light Orchestra'], ['Vou Deixar', 'Skank'], ['Shake It Off', 'Taylor Swift']] },
+  { day: 'quinta-feira', mood: 'pra embalar a reta final', emoji: '🚀', picks: [['Blinding Lights', 'The Weeknd'], ['Levitating', 'Dua Lipa'], ['Anna Júlia', 'Los Hermanos'], ['Uptown Funk', 'Mark Ronson, Bruno Mars']] },
+  { day: 'sexta-feira', mood: 'porque sextou', emoji: '🎉', picks: [["Friday I'm in Love", 'The Cure'], ['País Tropical', 'Jorge Ben Jor'], ['September', 'Earth, Wind & Fire'], ['Dancing Queen', 'ABBA']] },
+  { day: 'sábado', mood: 'pra curtir o fim de semana', emoji: '🌴', picks: [['Three Little Birds', 'Bob Marley & The Wailers'], ['Lança Perfume', 'Rita Lee'], ['Wonderwall', 'Oasis'], ['Good Vibrations', 'The Beach Boys']] }
+];
+
+const spRedirectUri = () => location.origin + location.pathname;
+const b64url = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const dayNumber = () => { const d = new Date(); return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000); };
+const todayVibe = () => WEEKDAY_VIBES[new Date().getDay()];
+
+function spGetToken() { try { return JSON.parse(localStorage.getItem(SK_SP_TOKEN)); } catch { return null; } }
+function spIsConnected() { const t = spGetToken(); return !!(t && (t.refresh_token || t.access_token)); }
+function spSaveToken(d) {
+  const prev = spGetToken() || {};
+  localStorage.setItem(SK_SP_TOKEN, JSON.stringify({
+    access_token: d.access_token,
+    refresh_token: d.refresh_token || prev.refresh_token,
+    expires_at: Date.now() + ((d.expires_in || 3600) - 60) * 1000
+  }));
+}
+
+async function spotifyLogin() {
+  if (!SPOTIFY_CLIENT_ID) {
+    showToast('Spotify ainda não configurado: falta o Client ID no app.js.', true);
+    return;
+  }
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(64)));
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  localStorage.setItem(SK_SP_VERIFIER, verifier);
+  const p = new URLSearchParams({
+    client_id: SPOTIFY_CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: spRedirectUri(),
+    code_challenge_method: 'S256',
+    code_challenge: challenge,
+    scope: SPOTIFY_SCOPES
+  });
+  location.href = 'https://accounts.spotify.com/authorize?' + p.toString();
+}
+
+function spotifyLogout(silent) {
+  localStorage.removeItem(SK_SP_TOKEN);
+  localStorage.removeItem(SK_SP_DAILY);
+  renderSpotifyCard();
+  updateSpotifySettings();
+  if (!silent) showToast('Spotify desconectado.');
+}
+
+// Volta do login do Spotify (?code=...)
+async function spotifyHandleCallback() {
+  const params = new URLSearchParams(location.search);
+  const code = params.get('code');
+  const err = params.get('error');
+  if (!code && !err) return;
+  history.replaceState(null, '', spRedirectUri() + location.hash);
+  if (err) { setTimeout(() => showToast('Conexão com o Spotify cancelada.', true), 800); return; }
+
+  const verifier = localStorage.getItem(SK_SP_VERIFIER);
+  if (!verifier) return;
+  try {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: SPOTIFY_CLIENT_ID,
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: spRedirectUri(),
+        code_verifier: verifier
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error_description || data.error || 'erro');
+    spSaveToken(data);
+    localStorage.removeItem(SK_SP_VERIFIER);
+    localStorage.removeItem(SK_SP_DAILY);
+    localStorage.removeItem(SK_SP_SHOWN); // mostra a música personalizada logo em seguida
+    setTimeout(() => showToast('Spotify conectado! 🎵'), 800);
+  } catch (e) {
+    setTimeout(() => showToast('Erro ao conectar Spotify: ' + e.message, true), 800);
+  }
+}
+
+async function spAccessToken() {
+  const t = spGetToken();
+  if (!t) return null;
+  if (t.access_token && Date.now() < t.expires_at) return t.access_token;
+  if (!t.refresh_token) return null;
+  try {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: SPOTIFY_CLIENT_ID })
+    });
+    const d = await res.json();
+    if (!res.ok) { spotifyLogout(true); return null; }
+    spSaveToken(d);
+    return d.access_token;
+  } catch { return null; }
+}
+
+async function spApi(path) {
+  const tok = await spAccessToken();
+  if (!tok) return null;
+  const r = await fetch('https://api.spotify.com/v1' + path, { headers: { Authorization: 'Bearer ' + tok } });
+  if (r.status === 401) { spotifyLogout(true); return null; }
+  if (!r.ok) return null;
+  return r.json();
+}
+
+function curatedPick() {
+  const v = todayVibe();
+  const [name, artist] = v.picks[Math.floor(dayNumber() / 7) % v.picks.length];
+  return { source: 'curated', name, artist, image: null, id: null, url: `https://open.spotify.com/search/${encodeURIComponent(name + ' ' + artist)}` };
+}
+
+function trackToPick(t) {
+  const imgs = (t.album && t.album.images) || [];
+  return {
+    source: 'account',
+    name: t.name,
+    artist: (t.artists || []).map(a => a.name).join(', '),
+    image: (imgs[1] || imgs[0] || {}).url || null,
+    id: t.id,
+    url: (t.external_urls && t.external_urls.spotify) || `https://open.spotify.com/track/${t.id}`
+  };
+}
+
+async function getDailyPick() {
+  const today = todayKey();
+  const connected = spIsConnected();
+  try {
+    const c = JSON.parse(localStorage.getItem(SK_SP_DAILY));
+    if (c && c.date === today && (!connected || c.pick.source === 'account')) return c.pick;
+  } catch { }
+
+  let pick = null;
+  if (connected) {
+    try {
+      // Alterna o período a cada dia pra não repetir sempre as mesmas
+      const range = ['short_term', 'medium_term', 'long_term'][dayNumber() % 3];
+      const top = await spApi(`/me/top/tracks?limit=50&time_range=${range}`);
+      let items = (top && top.items) || [];
+      if (!items.length) {
+        const rec = await spApi('/me/player/recently-played?limit=50');
+        items = ((rec && rec.items) || []).map(i => i.track).filter(Boolean);
+      }
+      if (items.length) pick = trackToPick(items[(dayNumber() * 7 + new Date().getDay()) % items.length]);
+    } catch (e) { console.warn('Spotify:', e); }
+  }
+  if (!pick) pick = curatedPick();
+  localStorage.setItem(SK_SP_DAILY, JSON.stringify({ date: today, pick }));
+  return pick;
+}
+
+async function renderSpotifyCard() {
+  const el = $('spotifyCard');
+  if (!el) return;
+  const pick = await getDailyPick();
+  const v = todayVibe();
+  const cover = pick.image
+    ? `<img class="sp-cover" src="${pick.image}" alt="Capa de ${esc(pick.name)}" />`
+    : `<div class="sp-cover sp-cover-ph">${SPOTIFY_SVG}</div>`;
+  el.innerHTML = `
+    <div class="sp-head">${SPOTIFY_SVG}<span>Música do dia · ${v.day}</span></div>
+    <div class="sp-body">
+      <button class="sp-open-modal" id="spCardOpen" title="Ver sugestão">
+        ${cover}
+        <div class="sp-info">
+          <div class="sp-name">${esc(pick.name)}</div>
+          <div class="sp-artist">${esc(pick.artist)}</div>
+        </div>
+      </button>
+      <a class="sp-play" href="${pick.url}" target="_blank" rel="noopener" title="Ouvir no Spotify">${PLAY_SVG}</a>
+    </div>
+    ${!spIsConnected() && SPOTIFY_CLIENT_ID ? '<button class="sp-connect" id="spCardConnect">Conectar meu Spotify</button>' : ''}`;
+}
+
+async function openSpotifyModal() {
+  const pick = await getDailyPick();
+  const v = todayVibe();
+  const connected = spIsConnected();
+  const reason = pick.source === 'account' ? 'Escolhida entre as que você mais ouve,' : 'Nossa sugestão';
+  const media = pick.id
+    ? `<iframe class="sp-embed" src="https://open.spotify.com/embed/track/${pick.id}?utm_source=generator" height="152" frameborder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy" title="Player do Spotify"></iframe>`
+    : `<div class="sp-modal-track">
+         <div class="sp-cover sp-cover-ph sp-cover-lg">${SPOTIFY_SVG}</div>
+         <div><div class="sp-name">${esc(pick.name)}</div><div class="sp-artist">${esc(pick.artist)}</div></div>
+       </div>`;
+
+  $('spotifyModalBody').innerHTML = `
+    <div class="sp-badge">${SPOTIFY_SVG} Música do dia</div>
+    <h3 class="sp-modal-title">${v.emoji} Hoje é ${v.day}</h3>
+    <p class="sp-modal-sub">${reason} ${v.mood}:</p>
+    ${media}
+    <a class="btn-spotify-solid sp-open" href="${pick.url}" target="_blank" rel="noopener">${SPOTIFY_SVG} Abrir no Spotify</a>
+    ${!connected && SPOTIFY_CLIENT_ID ? '<button class="sp-connect" id="spModalConnect">Conectar meu Spotify para sugestões com base no que eu ouço</button>' : ''}`;
+  $('spotify-overlay').classList.add('show');
+}
+
+function closeSpotifyModal() {
+  $('spotify-overlay').classList.remove('show');
+  // Para o áudio do embed ao fechar
+  const iframe = $('spotifyModalBody').querySelector('iframe');
+  if (iframe) iframe.src = 'about:blank';
+  maybeShowNotifBanner();
+}
+
+function updateSpotifySettings() {
+  const desc = $('settingsSpotifyDesc'), btn = $('settingsSpotifyBtn');
+  if (!desc) return;
+  if (!SPOTIFY_CLIENT_ID) {
+    desc.textContent = 'Sugestão por dia da semana (login não configurado)';
+    btn.textContent = 'Ver música';
+    btn.onclick = () => { closeSettings(); openSpotifyModal(); };
+  } else if (spIsConnected()) {
+    desc.textContent = 'Conectado: sugestões com base no que você ouve';
+    btn.textContent = 'Desconectar';
+    btn.onclick = () => spotifyLogout(false);
+  } else {
+    desc.textContent = 'Conecte para sugestões personalizadas';
+    btn.textContent = 'Conectar';
+    btn.onclick = spotifyLogin;
+  }
+}
+
+// Delegação: os botões do card/modal são recriados a cada render
+document.addEventListener('click', e => {
+  if (e.target.closest('#spCardConnect, #spModalConnect')) { e.preventDefault(); spotifyLogin(); return; }
+  if (e.target.closest('#spCardOpen')) { openSpotifyModal(); if (window.innerWidth <= 768) closeSidebar(); return; }
+});
+$('spotifyQuickBtn')?.addEventListener('click', openSpotifyModal);
+$('spotifyModalClose')?.addEventListener('click', closeSpotifyModal);
+$('spotify-overlay')?.addEventListener('click', e => { if (e.target === $('spotify-overlay')) closeSpotifyModal(); });
+
+// Primeira entrada do dia: abre o card da música; se o dia virar com o app aberto, avisa por notificação
+async function runDailySpotify() {
+  await renderSpotifyCard();
+  const today = todayKey();
+  if (localStorage.getItem(SK_SP_SHOWN) === today) { maybeShowNotifBanner(); return; }
+  localStorage.setItem(SK_SP_SHOWN, today);
+  if (document.hidden) {
+    const pick = await getDailyPick();
+    sendNotification(`🎵 Música do dia · ${todayVibe().day}`, `${pick.name} · ${pick.artist}`, { url: pick.url, tag: 'pmk-spotify-' + today });
+  } else {
+    setTimeout(openSpotifyModal, 1200);
+  }
+}
+
+let lastDayKey = todayKey();
+async function dailyTick() {
+  checkReminders();
+  const today = todayKey();
+  if (today !== lastDayKey) {
+    lastDayKey = today;
+    await renderSpotifyCard();
+    if (localStorage.getItem(SK_SP_SHOWN) !== today) {
+      localStorage.setItem(SK_SP_SHOWN, today);
+      const pick = await getDailyPick();
+      sendNotification(`🎵 Bom dia! Hoje é ${todayVibe().day}`, `Sugestão de hoje: ${pick.name} · ${pick.artist}`, { url: pick.url, tag: 'pmk-spotify-' + today });
+    }
+  }
+}
+setInterval(dailyTick, 30000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) dailyTick(); });
+
+function initDailyExtras() {
+  checkReminders();
+  runDailySpotify();
+}
 
 /* ────── App init (after auth) ────── */
 async function initApp() {
@@ -1809,11 +2220,14 @@ async function initApp() {
   if (missed > 0) {
     setTimeout(() => showToast(`Você deixou ${missed} tarefa(s) pendente(s) ontem.`, true), 1500);
   }
+
+  initDailyExtras();
 }
 
 /* ────── BOOT ────── */
 (async function boot() {
   loadTheme();
+  await spotifyHandleCallback();
   await initIDB();
   $('app').style.display = 'none';
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agenda-cache-v7';
+const CACHE_NAME = 'agenda-cache-v8';
 const urlsToCache = [
   './index.html',
   './style.css',
@@ -29,18 +29,39 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.url.includes('firestore') || event.request.url.includes('firebase')) {
-    return;
-  }
-  
+  const req = event.request;
+  // Só faz cache de GETs do próprio site. POSTs (Gemini, Spotify token) e APIs externas
+  // passam direto — cache.put em POST lança erro e quebrava essas chamadas.
+  if (req.method !== 'GET') return;
+  if (new URL(req.url).origin !== self.location.origin) return;
+
   event.respondWith(
-    fetch(event.request).then(response => {
-      return caches.open(CACHE_NAME).then(cache => {
-        cache.put(event.request, response.clone());
-        return response;
-      });
-    }).catch(() => {
-      return caches.match(event.request);
-    })
+    fetch(req).then(response => {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then(cache => cache.put(req, copy)).catch(() => { });
+      return response;
+    }).catch(() => caches.match(req))
   );
+});
+
+/* ────── Clique na notificação ────── */
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const data = event.notification.data || {};
+  const target = data.url || self.registration.scope;
+
+  event.waitUntil((async () => {
+    // Link externo (ex: música no Spotify) → abre direto
+    if (data.url && !data.url.startsWith(self.registration.scope)) {
+      return self.clients.openWindow(data.url);
+    }
+    // Senão, foca o app se já estiver aberto
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of all) {
+      if (client.url.startsWith(self.registration.scope) && 'focus' in client) {
+        return client.focus();
+      }
+    }
+    return self.clients.openWindow(target);
+  })());
 });
