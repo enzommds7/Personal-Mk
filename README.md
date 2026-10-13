@@ -7,6 +7,7 @@ Galeria de Imagens Otimizada:Suporte a upload ilimitado de imagens com compress�
 Editor Rich Text:Formatação de texto (negrito, itálico, listas, blocos de código) nativa sem bibliotecas pesadas.
 Sistema de Tags:Organização por hashtags automáticas (#trabalho, #ideias) com filtro de busca em tempo real.
 Exportação e Backup:Exporte notas em `.txt` ou gere um arquivo `.json` com o backup completo de todos os dias.
+API DO SPOTIFY 
 
 
 Este projeto foi construído **sem o uso de frameworks pesados** para garantir o máximo de controle sobre o DOM e performance. Toda a aplicação reside em um modelo *Single-File Component* adaptado (um único `index.html` contendo estrutura, estilos e lógica).
