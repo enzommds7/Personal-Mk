@@ -971,13 +971,44 @@ window.addEventListener('popstate', (e) => {
     else closeSidebar();
   }
 });
-$('hamburgerBtn').addEventListener('click', () => {
+function toggleMobileSidebar() {
+  $('sidebar').classList.contains('open') ? closeSidebar() : openSidebar();
+}
+
+$('hamburgerBtn')?.addEventListener('click', () => {
   if (window.innerWidth <= 768) {
-    $('sidebar').classList.contains('open') ? closeSidebar() : openSidebar();
+    toggleMobileSidebar();
   } else {
     $('sidebar').classList.remove('collapsed');
   }
 });
+$('mobileMenuBtn')?.addEventListener('click', toggleMobileSidebar);
+$('mobileCloseSidebarBtn')?.addEventListener('click', closeSidebar);
+$('mobileNewDayBtn')?.addEventListener('click', () => { closeSidebar(); pickDateModal(); });
+$('mobileSettingsBtn')?.addEventListener('click', () => { closeSidebar(); openSettings(); });
+
+// Gestos touch de swipe para abrir/fechar sidebar no celular
+let touchStartX = 0, touchStartY = 0;
+document.addEventListener('touchstart', e => {
+  if (e.touches && e.touches.length === 1) {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }
+}, { passive: true });
+
+document.addEventListener('touchend', e => {
+  if (window.innerWidth > 768 || !e.changedTouches) return;
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if (Math.abs(dx) > 65 && Math.abs(dy) < 60) {
+    if (dx > 0 && touchStartX < 55 && !$('sidebar').classList.contains('open')) {
+      openSidebar();
+    } else if (dx < 0 && $('sidebar').classList.contains('open')) {
+      closeSidebar();
+    }
+  }
+}, { passive: true });
+
 $('collapseSidebarBtn').addEventListener('click', () => {
   $('sidebar').classList.add('collapsed');
 });
@@ -1900,16 +1931,151 @@ function checkReminders() {
  * 3. Cole o Client ID abaixo. Ele é público, pode ficar no código (o fluxo PKCE não usa secret).
  * Sem Client ID, o app usa a sugestão por dia da semana.
  */
-const SPOTIFY_CLIENT_ID = '';
+const SPOTIFY_CLIENT_ID = ''; // Opcional default; o usuário também pode configurar diretamente no app
 const SPOTIFY_SCOPES = 'user-top-read user-read-recently-played';
 const SK_SP_TOKEN = 'pmk_spotify_token';
 const SK_SP_VERIFIER = 'pmk_spotify_verifier';
 const SK_SP_DAILY = 'pmk_spotify_daily';
 const SK_SP_SHOWN = 'pmk_spotify_popup_shown';
+const SK_SP_CLIENT_ID = 'pmk_spotify_client_id';
+const SK_SP_GENRE = 'pmk_spotify_genre';
+
 const SPOTIFY_SVG = '<svg class="sp-logo" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>';
 const PLAY_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
 
-// Sugestões por dia da semana (usadas sem login ou se a conta não tiver histórico)
+function getSpotifyClientId() {
+  return (localStorage.getItem(SK_SP_CLIENT_ID) || SPOTIFY_CLIENT_ID || '').trim();
+}
+function setSpotifyClientId(id) {
+  if (id && id.trim()) localStorage.setItem(SK_SP_CLIENT_ID, id.trim());
+  else localStorage.removeItem(SK_SP_CLIENT_ID);
+}
+function getSpotifyGenre() {
+  return localStorage.getItem(SK_SP_GENRE) || '';
+}
+function setSpotifyGenre(g) {
+  if (g) localStorage.setItem(SK_SP_GENRE, g);
+  else localStorage.removeItem(SK_SP_GENRE);
+}
+
+// Biblioteca de músicas por estilo/gênero (usada quando o usuário escolhe suas preferências sem login)
+const GENRE_PICKS = {
+  'rock': {
+    name: 'Rock & Pop Rock',
+    emoji: '🎸',
+    picks: [
+      ['Don\'t Stop Me Now', 'Queen'],
+      ['Tempo Perdido', 'Legião Urbana'],
+      ['In the End', 'Linkin Park'],
+      ['Californication', 'Red Hot Chili Peppers'],
+      ['Sweet Child O\' Mine', 'Guns N\' Roses'],
+      ['Everlong', 'Foo Fighters'],
+      ['Admirável Chip Novo', 'Pitty'],
+      ['Dias Atrás', 'CPM 22'],
+      ['Smells Like Teen Spirit', 'Nirvana'],
+      ['The Scientist', 'Coldplay']
+    ]
+  },
+  'pop': {
+    name: 'Pop & Hits',
+    emoji: '🎤',
+    picks: [
+      ['Blinding Lights', 'The Weeknd'],
+      ['Levitating', 'Dua Lipa'],
+      ['As It Was', 'Harry Styles'],
+      ['24K Magic', 'Bruno Mars'],
+      ['Viva La Vida', 'Coldplay'],
+      ['Style', 'Taylor Swift'],
+      ['Flowers', 'Miley Cyrus'],
+      ['Shape of You', 'Ed Sheeran'],
+      ['Save Your Tears', 'The Weeknd']
+    ]
+  },
+  'trap': {
+    name: 'Trap & Hip-Hop',
+    emoji: '⚡',
+    picks: [
+      ['Kenny G', 'Matuê'],
+      ['HIGHEST IN THE ROOM', 'Travis Scott'],
+      ['Lose Yourself', 'Eminem'],
+      ['HUMBLE.', 'Kendrick Lamar'],
+      ['Circles', 'Post Malone'],
+      ['Freio da Blazer', 'L7NNON'],
+      ['Vida Loka (Parte 2)', 'Racionais MC\'s'],
+      ['Godzilla', 'Eminem'],
+      ['Máquina do Tempo', 'Matuê']
+    ]
+  },
+  'mpb': {
+    name: 'MPB & Clássicos BR',
+    emoji: '🇧🇷',
+    picks: [
+      ['Não Quero Dinheiro', 'Tim Maia'],
+      ['País Tropical', 'Jorge Ben Jor'],
+      ['Sina', 'Djavan'],
+      ['Vou Deixar', 'Skank'],
+      ['Mania de Você', 'Rita Lee'],
+      ['Anunciação', 'Alceu Valença'],
+      ['Andar com Fé', 'Gilberto Gil'],
+      ['Garota de Ipanema', 'Tom Jobim'],
+      ['Apenas Mais Uma de Amor', 'Lulu Santos']
+    ]
+  },
+  'sertanejo': {
+    name: 'Sertanejo',
+    emoji: '🤠',
+    picks: [
+      ['Sosseguei', 'Jorge & Mateus'],
+      ['Até Você Voltar', 'Henrique & Juliano'],
+      ['Infiel', 'Marília Mendonça'],
+      ['A Maior Saudade', 'Henrique & Juliano'],
+      ['Propaganda', 'Jorge & Mateus'],
+      ['Balada (Tchê Tcherere)', 'Gusttavo Lima'],
+      ['Evidências', 'Chitãozinho & Xororó']
+    ]
+  },
+  'lofi': {
+    name: 'Lo-Fi & Relax',
+    emoji: '☕',
+    picks: [
+      ['Snowman', 'Lofi Girl'],
+      ['[im closing my eyes]', 'potsu'],
+      ['Kingdom in Blue', 'Kupla'],
+      ['Controlla', 'Idealism'],
+      ['Affection', 'Jinsang'],
+      ['5:32pm', 'The Deli'],
+      ['Again', 'Wun Two']
+    ]
+  },
+  'eletronica': {
+    name: 'Eletrônica',
+    emoji: '🎧',
+    picks: [
+      ['One More Time', 'Daft Punk'],
+      ['Wake Me Up', 'Avicii'],
+      ['Summer', 'Calvin Harris'],
+      ['Hear Me Now', 'Alok'],
+      ['The Business', 'Tiësto'],
+      ['Titanium', 'David Guetta, Sia'],
+      ['Midnight City', 'M83']
+    ]
+  },
+  'foco': {
+    name: 'Foco & Instrumental',
+    emoji: '🎯',
+    picks: [
+      ['Time', 'Hans Zimmer'],
+      ['Clair de Lune', 'Claude Debussy'],
+      ['Weightless', 'Marconi Union'],
+      ['Nuvole Bianche', 'Ludovico Einaudi'],
+      ['Intro', 'The xx'],
+      ['On the Nature of Daylight', 'Max Richter'],
+      ['Experience', 'Ludovico Einaudi']
+    ]
+  }
+};
+
+// Sugestões por dia da semana (fallback padrão)
 const WEEKDAY_VIBES = [
   { day: 'domingo', mood: 'pra desacelerar', emoji: '☀️', picks: [['Garota de Ipanema', 'Tom Jobim'], ['Here Comes the Sun', 'The Beatles'], ['Trem-Bala', 'Ana Vilela'], ['Sunday Morning', 'Maroon 5']] },
   { day: 'segunda-feira', mood: 'pra começar a semana com energia', emoji: '⚡', picks: [['Eye of the Tiger', 'Survivor'], ["Don't Stop Me Now", 'Queen'], ['Lose Yourself', 'Eminem'], ['Tempo Perdido', 'Legião Urbana']] },
@@ -1937,15 +2103,16 @@ function spSaveToken(d) {
 }
 
 async function spotifyLogin() {
-  if (!SPOTIFY_CLIENT_ID) {
-    showToast('Spotify ainda não configurado: falta o Client ID no app.js.', true);
+  const cid = getSpotifyClientId();
+  if (!cid) {
+    openSpotifyModal(true);
     return;
   }
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(64)));
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   localStorage.setItem(SK_SP_VERIFIER, verifier);
   const p = new URLSearchParams({
-    client_id: SPOTIFY_CLIENT_ID,
+    client_id: cid,
     response_type: 'code',
     redirect_uri: spRedirectUri(),
     code_challenge_method: 'S256',
@@ -1973,13 +2140,14 @@ async function spotifyHandleCallback() {
   if (err) { setTimeout(() => showToast('Conexão com o Spotify cancelada.', true), 800); return; }
 
   const verifier = localStorage.getItem(SK_SP_VERIFIER);
-  if (!verifier) return;
+  const cid = getSpotifyClientId();
+  if (!verifier || !cid) return;
   try {
     const res = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        client_id: SPOTIFY_CLIENT_ID,
+        client_id: cid,
         grant_type: 'authorization_code',
         code,
         redirect_uri: spRedirectUri(),
@@ -1991,8 +2159,8 @@ async function spotifyHandleCallback() {
     spSaveToken(data);
     localStorage.removeItem(SK_SP_VERIFIER);
     localStorage.removeItem(SK_SP_DAILY);
-    localStorage.removeItem(SK_SP_SHOWN); // mostra a música personalizada logo em seguida
-    setTimeout(() => showToast('Spotify conectado! 🎵'), 800);
+    localStorage.removeItem(SK_SP_SHOWN);
+    setTimeout(() => showToast('Spotify conectado com sucesso! 🎵'), 800);
   } catch (e) {
     setTimeout(() => showToast('Erro ao conectar Spotify: ' + e.message, true), 800);
   }
@@ -2003,11 +2171,13 @@ async function spAccessToken() {
   if (!t) return null;
   if (t.access_token && Date.now() < t.expires_at) return t.access_token;
   if (!t.refresh_token) return null;
+  const cid = getSpotifyClientId();
+  if (!cid) return null;
   try {
     const res = await fetch('https://accounts.spotify.com/api/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: SPOTIFY_CLIENT_ID })
+      body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refresh_token, client_id: cid })
     });
     const d = await res.json();
     if (!res.ok) { spotifyLogout(true); return null; }
@@ -2026,9 +2196,31 @@ async function spApi(path) {
 }
 
 function curatedPick() {
+  const genre = getSpotifyGenre();
+  if (genre && GENRE_PICKS[genre]) {
+    const gp = GENRE_PICKS[genre];
+    const [name, artist] = gp.picks[Math.floor(dayNumber()) % gp.picks.length];
+    return {
+      source: 'genre',
+      genreName: gp.name,
+      name,
+      artist,
+      image: null,
+      id: null,
+      url: `https://open.spotify.com/search/${encodeURIComponent(name + ' ' + artist)}`
+    };
+  }
   const v = todayVibe();
   const [name, artist] = v.picks[Math.floor(dayNumber() / 7) % v.picks.length];
-  return { source: 'curated', name, artist, image: null, id: null, url: `https://open.spotify.com/search/${encodeURIComponent(name + ' ' + artist)}` };
+  return {
+    source: 'curated',
+    genreName: v.mood,
+    name,
+    artist,
+    image: null,
+    id: null,
+    url: `https://open.spotify.com/search/${encodeURIComponent(name + ' ' + artist)}`
+  };
 }
 
 function trackToPick(t) {
@@ -2046,15 +2238,19 @@ function trackToPick(t) {
 async function getDailyPick() {
   const today = todayKey();
   const connected = spIsConnected();
+  const genre = getSpotifyGenre();
   try {
     const c = JSON.parse(localStorage.getItem(SK_SP_DAILY));
-    if (c && c.date === today && (!connected || c.pick.source === 'account')) return c.pick;
+    if (c && c.date === today) {
+      if (connected && c.pick.source === 'account') return c.pick;
+      if (!connected && genre && c.pick.source === 'genre' && c.pick.genreKey === genre) return c.pick;
+      if (!connected && !genre && c.pick.source === 'curated') return c.pick;
+    }
   } catch { }
 
   let pick = null;
   if (connected) {
     try {
-      // Alterna o período a cada dia pra não repetir sempre as mesmas
       const range = ['short_term', 'medium_term', 'long_term'][dayNumber() % 3];
       const top = await spApi(`/me/top/tracks?limit=50&time_range=${range}`);
       let items = (top && top.items) || [];
@@ -2065,7 +2261,10 @@ async function getDailyPick() {
       if (items.length) pick = trackToPick(items[(dayNumber() * 7 + new Date().getDay()) % items.length]);
     } catch (e) { console.warn('Spotify:', e); }
   }
-  if (!pick) pick = curatedPick();
+  if (!pick) {
+    pick = curatedPick();
+    if (genre) pick.genreKey = genre;
+  }
   localStorage.setItem(SK_SP_DAILY, JSON.stringify({ date: today, pick }));
   return pick;
 }
@@ -2075,11 +2274,12 @@ async function renderSpotifyCard() {
   if (!el) return;
   const pick = await getDailyPick();
   const v = todayVibe();
+  const connected = spIsConnected();
   const cover = pick.image
     ? `<img class="sp-cover" src="${pick.image}" alt="Capa de ${esc(pick.name)}" />`
     : `<div class="sp-cover sp-cover-ph">${SPOTIFY_SVG}</div>`;
   el.innerHTML = `
-    <div class="sp-head">${SPOTIFY_SVG}<span>Música do dia · ${v.day}</span></div>
+    <div class="sp-head">${SPOTIFY_SVG}<span>Música do dia · ${connected ? 'Sua Conta' : v.day}</span></div>
     <div class="sp-body">
       <button class="sp-open-modal" id="spCardOpen" title="Ver sugestão">
         ${cover}
@@ -2090,34 +2290,103 @@ async function renderSpotifyCard() {
       </button>
       <a class="sp-play" href="${pick.url}" target="_blank" rel="noopener" title="Ouvir no Spotify">${PLAY_SVG}</a>
     </div>
-    ${!spIsConnected() && SPOTIFY_CLIENT_ID ? '<button class="sp-connect" id="spCardConnect">Conectar meu Spotify</button>' : ''}`;
+    ${!connected ? '<button class="sp-connect" id="spCardConnect">Conectar Spotify</button>' : ''}`;
 }
 
-async function openSpotifyModal() {
+async function openSpotifyModal(showSetupImmediately = false) {
   const pick = await getDailyPick();
   const v = todayVibe();
   const connected = spIsConnected();
-  const reason = pick.source === 'account' ? 'Escolhida entre as que você mais ouve,' : 'Nossa sugestão';
+  const cid = getSpotifyClientId();
+  const currentGenre = getSpotifyGenre();
+
+  let statusLabel = 'Sugestão do Dia';
+  if (pick.source === 'account') statusLabel = 'Com base nas suas mais ouvidas';
+  else if (pick.source === 'genre') statusLabel = `Estilo: ${pick.genreName}`;
+
   const media = pick.id
     ? `<iframe class="sp-embed" src="https://open.spotify.com/embed/track/${pick.id}?utm_source=generator" height="152" frameborder="0" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy" title="Player do Spotify"></iframe>`
     : `<div class="sp-modal-track">
          <div class="sp-cover sp-cover-ph sp-cover-lg">${SPOTIFY_SVG}</div>
-         <div><div class="sp-name">${esc(pick.name)}</div><div class="sp-artist">${esc(pick.artist)}</div></div>
+         <div style="flex:1;min-width:0;">
+           <div class="sp-name" style="font-weight:700;font-size:14.5px;">${esc(pick.name)}</div>
+           <div class="sp-artist" style="font-size:12.5px;color:var(--text-secondary);margin-top:2px;">${esc(pick.artist)}</div>
+           <div style="font-size:11px;color:var(--gold);margin-top:4px;">${statusLabel}</div>
+         </div>
+       </div>`;
+
+  // Genre chips
+  const genreChipsHtml = Object.entries(GENRE_PICKS).map(([k, g]) => {
+    const act = currentGenre === k ? ' active' : '';
+    return `<button class="sp-genre-chip${act}" data-genre="${k}">${g.emoji} ${g.name}</button>`;
+  }).join('');
+
+  const connectionSection = connected
+    ? `<div class="sp-connected-user">
+         <div class="sp-connected-info">
+           ${SPOTIFY_SVG}
+           <span>Conta Spotify Conectada</span>
+         </div>
+         <button class="sp-disconnect-btn" id="spModalDisconnectBtn">Desconectar</button>
+       </div>`
+    : `<div class="sp-account-card">
+         <div class="sp-account-header">
+           <div class="sp-account-icon">${SPOTIFY_SVG}</div>
+           <div>
+             <div class="sp-account-title">Vincular sua Conta do Spotify</div>
+             <div class="sp-account-sub">Receba todo dia músicas dos seus artistas favoritos e do seu histórico real!</div>
+           </div>
+         </div>
+         <button class="btn-spotify-solid" id="spModalConnectBtn" style="margin-top:4px;">
+           ${SPOTIFY_SVG} ${cid ? 'Entrar com Spotify' : 'Conectar Minha Conta'}
+         </button>
+       </div>
+
+       <div class="sp-setup-drawer" id="spSetupDrawer" style="display:${showSetupImmediately || !cid ? 'flex' : 'none'};">
+         <div class="sp-setup-head">🔑 Como conectar sua conta (1 Minuto):</div>
+         <p class="sp-setup-text">O Spotify exige um Client ID gratuito para autorizar no seu navegador com 100% de privacidade:</p>
+         <ol class="sp-steps">
+           <li>Acesse <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a> e faça login.</li>
+           <li>Clique em <b>Create App</b> (nome sugerido: <i>PersonalMk</i>).</li>
+           <li>Em <b>Redirect URIs</b>, adicione exatamente a URL abaixo:
+             <div class="sp-copy-box">
+               <code id="spRedirectUriCode">${spRedirectUri()}</code>
+               <button type="button" class="sp-copy-btn" id="spCopyRedirectBtn">Copiar</button>
+             </div>
+           </li>
+           <li>Copie o <b>Client ID</b> do painel e cole aqui:</li>
+         </ol>
+         <div class="sp-input-box">
+           <input type="text" id="spClientIdInput" class="auth-input" placeholder="Cole o Client ID aqui..." value="${cid}" />
+           <button class="btn-spotify-solid" id="spSaveConnectBtn">${SPOTIFY_SVG} Salvar e Entrar</button>
+         </div>
        </div>`;
 
   $('spotifyModalBody').innerHTML = `
     <div class="sp-badge">${SPOTIFY_SVG} Música do dia</div>
     <h3 class="sp-modal-title">${v.emoji} Hoje é ${v.day}</h3>
-    <p class="sp-modal-sub">${reason} ${v.mood}:</p>
+    <p class="sp-modal-sub">${pick.source === 'account' ? 'Escolhida entre o que você mais ouve' : 'Sua trilha sonora de hoje'}:</p>
+    
+    ${connectionSection}
+
+    <div class="sp-divider">Música de Hoje</div>
     ${media}
-    <a class="btn-spotify-solid sp-open" href="${pick.url}" target="_blank" rel="noopener">${SPOTIFY_SVG} Abrir no Spotify</a>
-    ${!connected && SPOTIFY_CLIENT_ID ? '<button class="sp-connect" id="spModalConnect">Conectar meu Spotify para sugestões com base no que eu ouço</button>' : ''}`;
+    <a class="btn-spotify-solid sp-open" href="${pick.url}" target="_blank" rel="noopener">${SPOTIFY_SVG} Ouvir no Spotify</a>
+
+    <div class="sp-divider">Ou personalize seu gosto musical sem login</div>
+    <div class="sp-genres-box">
+      <div class="sp-genres-title">✨ Prefere escolher sem conectar a conta? Toque no seu estilo:</div>
+      <div class="sp-genres-chips" id="spGenreChips">
+        ${genreChipsHtml}
+      </div>
+    </div>
+  `;
+
   $('spotify-overlay').classList.add('show');
 }
 
 function closeSpotifyModal() {
   $('spotify-overlay').classList.remove('show');
-  // Para o áudio do embed ao fechar
   const iframe = $('spotifyModalBody').querySelector('iframe');
   if (iframe) iframe.src = 'about:blank';
   maybeShowNotifBanner();
@@ -2126,26 +2395,76 @@ function closeSpotifyModal() {
 function updateSpotifySettings() {
   const desc = $('settingsSpotifyDesc'), btn = $('settingsSpotifyBtn');
   if (!desc) return;
-  if (!SPOTIFY_CLIENT_ID) {
-    desc.textContent = 'Sugestão por dia da semana (login não configurado)';
-    btn.textContent = 'Ver música';
-    btn.onclick = () => { closeSettings(); openSpotifyModal(); };
-  } else if (spIsConnected()) {
-    desc.textContent = 'Conectado: sugestões com base no que você ouve';
+  const cid = getSpotifyClientId();
+  const genre = getSpotifyGenre();
+  const genreLabel = genre && GENRE_PICKS[genre] ? ` (Estilo: ${GENRE_PICKS[genre].name})` : '';
+
+  if (spIsConnected()) {
+    desc.textContent = 'Conta Spotify conectada com sucesso!';
     btn.textContent = 'Desconectar';
-    btn.onclick = () => spotifyLogout(false);
-  } else {
-    desc.textContent = 'Conecte para sugestões personalizadas';
-    btn.textContent = 'Conectar';
+    btn.onclick = () => { spotifyLogout(false); updateSpotifySettings(); };
+  } else if (cid) {
+    desc.textContent = `Configurado com Client ID${genreLabel}. Pronto para conectar!`;
+    btn.textContent = 'Entrar';
     btn.onclick = spotifyLogin;
+  } else {
+    desc.textContent = `Sugestão diária${genreLabel}. Toque para configurar ou conectar.`;
+    btn.textContent = 'Configurar';
+    btn.onclick = () => { closeSettings(); openSpotifyModal(true); };
   }
 }
 
-// Delegação: os botões do card/modal são recriados a cada render
-document.addEventListener('click', e => {
-  if (e.target.closest('#spCardConnect, #spModalConnect')) { e.preventDefault(); spotifyLogin(); return; }
-  if (e.target.closest('#spCardOpen')) { openSpotifyModal(); if (window.innerWidth <= 768) closeSidebar(); return; }
+// Delegação de eventos do Spotify
+document.addEventListener('click', async e => {
+  if (e.target.closest('#spCardConnect, #spModalConnectBtn')) {
+    e.preventDefault();
+    spotifyLogin();
+    return;
+  }
+  if (e.target.closest('#spCardOpen')) {
+    openSpotifyModal();
+    if (window.innerWidth <= 768) closeSidebar();
+    return;
+  }
+  if (e.target.closest('#spModalDisconnectBtn')) {
+    e.preventDefault();
+    spotifyLogout(false);
+    openSpotifyModal();
+    return;
+  }
+  if (e.target.closest('#spCopyRedirectBtn')) {
+    e.preventDefault();
+    const txt = $('spRedirectUriCode')?.textContent || spRedirectUri();
+    navigator.clipboard.writeText(txt).then(() => {
+      showToast('URL copiada para a área de transferência! 📋');
+    });
+    return;
+  }
+  if (e.target.closest('#spSaveConnectBtn')) {
+    e.preventDefault();
+    const val = $('spClientIdInput')?.value.trim();
+    if (!val) {
+      showToast('Cole o seu Client ID do Spotify.', true);
+      return;
+    }
+    setSpotifyClientId(val);
+    showToast('Client ID salvo! Redirecionando...');
+    setTimeout(() => spotifyLogin(), 400);
+    return;
+  }
+  const chip = e.target.closest('.sp-genre-chip');
+  if (chip) {
+    e.preventDefault();
+    const genre = chip.dataset.genre;
+    setSpotifyGenre(genre);
+    localStorage.removeItem(SK_SP_DAILY);
+    showToast(`Estilo atualizado: ${GENRE_PICKS[genre]?.name || genre}! 🎵`);
+    await renderSpotifyCard();
+    openSpotifyModal();
+    return;
+  }
 });
+
 $('spotifyQuickBtn')?.addEventListener('click', openSpotifyModal);
 $('spotifyModalClose')?.addEventListener('click', closeSpotifyModal);
 $('spotify-overlay')?.addEventListener('click', e => { if (e.target === $('spotify-overlay')) closeSpotifyModal(); });
