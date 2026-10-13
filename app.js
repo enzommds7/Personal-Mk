@@ -1400,6 +1400,11 @@ $('themeToggleBtn').addEventListener('click', toggleTheme);
 window.addEventListener('keydown', e => {
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   const modKey = isMac ? e.metaKey : e.ctrlKey;
+  const isTyping = document.activeElement && (
+    document.activeElement.tagName === 'INPUT' ||
+    document.activeElement.tagName === 'TEXTAREA' ||
+    document.activeElement.isContentEditable
+  );
 
   // 1. Ctrl/Cmd + Tab: Alternar entre abas
   if (modKey && e.key === 'Tab') {
@@ -1409,8 +1414,8 @@ window.addEventListener('keydown', e => {
     return;
   }
 
-  // 2. Ctrl/Cmd + N: Criar nova anotação
-  if (modKey && e.key.toLowerCase() === 'n') {
+  // 2. Alt + N ou Ctrl/Cmd + N: Criar nova anotação (Alt + N funciona livremente no navegador)
+  if ((modKey || e.altKey) && e.key.toLowerCase() === 'n') {
     e.preventDefault();
     pickDateModal();
     return;
@@ -1430,12 +1435,6 @@ window.addEventListener('keydown', e => {
   }
 
   // 4. Ctrl/Cmd + K ou / : Busca rápida
-  const isTyping = document.activeElement && (
-    document.activeElement.tagName === 'INPUT' ||
-    document.activeElement.tagName === 'TEXTAREA' ||
-    document.activeElement.isContentEditable
-  );
-
   if ((modKey && e.key.toLowerCase() === 'k') || (!isTyping && e.key === '/')) {
     e.preventDefault();
     openQuickSearch();
