@@ -71,26 +71,215 @@ function localSetDay(k, content, tags, images, checklist) {
 function localDelDay(k) { const d = loadLocal(); delete d[k]; saveLocal(d); }
 function allKeys() { return Object.keys(loadLocal()).sort().reverse(); }
 
-/* ────── Firestore Sync ────── */
+/* ────── Firestore Sync & Realtime Listener ────── */
 function userDaysRef() { return db.collection('users').doc(currentUser.uid).collection('days'); }
+
+let realtimeUnsubscribe = null;
+let isApplyingRemoteChange = false;
+
+function setSyncStatus(state) {
+  const bar = $('syncBar'); const txt = $('syncText');
+  if (bar && txt) {
+    bar.className = 'sync-bar ' + state;
+    if (state === 'synced') txt.textContent = 'Sincronizado ✓';
+    else if (state === 'syncing') txt.textContent = 'Sincronizando...';
+    else txt.textContent = 'Modo local';
+  }
+  const mob = $('mobileSyncIndicator');
+  if (mob) {
+    mob.className = 'mobile-sync-badge ' + state;
+    mob.title = state === 'synced' ? 'Nuvem sincronizada ✓' : (state === 'syncing' ? 'Sincronizando com nuvem...' : 'Modo offline (toque para conectar)');
+  }
+}
+
+function mergeRemoteDay(key, remoteDoc, localData) {
+  const localDoc = localData[key];
+  if (!localDoc) {
+    localData[key] = remoteDoc;
+    return true;
+  }
+  
+  const remoteContent = (remoteDoc.content || '').trim();
+  const localContent = (localDoc.content || '').trim();
+  
+  // Rule 1: A placeholder/empty local note NEVER overwrites a cloud note with content
+  if (!localContent && remoteContent) {
+    localData[key] = { ...localDoc, ...remoteDoc };
+    return true;
+  }
+  
+  // Rule 2: If cloud note has no content while local note does, keep local note
+  if (localContent && !remoteContent) {
+    return false;
+  }
+  
+  // Rule 3: Compare timestamps
+  const remoteTime = remoteDoc.updatedAt ? new Date(remoteDoc.updatedAt).getTime() : 0;
+  const localTime = localDoc.updatedAt ? new Date(localDoc.updatedAt).getTime() : 0;
+  
+  if (remoteTime > localTime || (!localTime && remoteTime)) {
+    if (localDoc.content !== remoteDoc.content ||
+        JSON.stringify(localDoc.tags || []) !== JSON.stringify(remoteDoc.tags || []) ||
+        JSON.stringify(localDoc.checklist || []) !== JSON.stringify(remoteDoc.checklist || [])) {
+      localData[key] = { ...localDoc, ...remoteDoc };
+      return true;
+    }
+  }
+  return false;
+}
+
+function startRealtimeSync() {
+  if (!db || !currentUser || !FB_ON) return;
+  if (realtimeUnsubscribe) {
+    try { realtimeUnsubscribe(); } catch (e) {}
+    realtimeUnsubscribe = null;
+  }
+
+  setSyncStatus('syncing');
+
+  try {
+    realtimeUnsubscribe = userDaysRef().onSnapshot(snapshot => {
+      setSyncStatus('synced');
+      let hasChanges = false;
+      const local = loadLocal();
+      let activeTabChanged = false;
+
+      snapshot.docChanges().forEach(change => {
+        const doc = change.doc;
+        // Ignore local pending writes to avoid self-echoing while typing
+        if (doc.metadata && doc.metadata.hasPendingWrites) return;
+
+        const key = doc.id;
+        if (change.type === 'removed') {
+          if (local[key]) {
+            delete local[key];
+            hasChanges = true;
+            if (activeTab === key) activeTabChanged = true;
+          }
+        } else {
+          const raw = doc.data();
+          const remote = {
+            content: raw.content || '',
+            tags: raw.tags || [],
+            images: raw.images || [],
+            checklist: raw.checklist || [],
+            updatedAt: raw.updatedAt?.toDate?.()?.toISOString() || raw.updatedAt || null
+          };
+
+          if (mergeRemoteDay(key, remote, local)) {
+            hasChanges = true;
+            if (activeTab === key) activeTabChanged = true;
+          }
+        }
+      });
+
+      if (hasChanges) {
+        saveLocal(local);
+        renderSidebar($('searchInput')?.value || '');
+        renderTagFilterBar();
+        renderCalendar();
+
+        if (activeTabChanged && activeTab && local[activeTab]) {
+          const isUserTyping = document.activeElement === $('editor');
+          if (!isUserTyping) {
+            isApplyingRemoteChange = true;
+            const day = local[activeTab];
+            $('editor').innerHTML = day.content || '';
+            currentTags = day.tags ? [...day.tags] : [];
+            renderTagsInEditor();
+            currentChecklist = day.checklist ? [...day.checklist] : [];
+            if (typeof renderChecklist === 'function') renderChecklist();
+            if (typeof renderGallery === 'function') renderGallery();
+            updateWC();
+            $('currentDaySubtitle').textContent = day.updatedAt ? `Última edição: ${new Date(day.updatedAt).toLocaleString('pt-BR')}` : 'Sincronizado';
+            isApplyingRemoteChange = false;
+          }
+        }
+      }
+    }, err => {
+      console.warn('Realtime sync warning:', err);
+      setSyncStatus('offline');
+    });
+  } catch (err) {
+    console.error('Failed to attach realtime sync:', err);
+    setSyncStatus('offline');
+  }
+}
+
+async function checkAndSyncCloud() {
+  if (!currentUser || !FB_ON) return;
+  try {
+    setSyncStatus('syncing');
+    const snap = await userDaysRef().get();
+    const local = loadLocal();
+    let hasChanges = false;
+    let activeTabChanged = false;
+
+    snap.forEach(doc => {
+      const raw = doc.data();
+      const remote = {
+        content: raw.content || '',
+        tags: raw.tags || [],
+        images: raw.images || [],
+        checklist: raw.checklist || [],
+        updatedAt: raw.updatedAt?.toDate?.()?.toISOString() || raw.updatedAt || null
+      };
+      if (mergeRemoteDay(doc.id, remote, local)) {
+        hasChanges = true;
+        if (activeTab === doc.id) activeTabChanged = true;
+      }
+    });
+
+    if (hasChanges) {
+      saveLocal(local);
+      renderSidebar($('searchInput')?.value || '');
+      renderTagFilterBar();
+      renderCalendar();
+
+      if (activeTabChanged && activeTab && local[activeTab] && document.activeElement !== $('editor')) {
+        isApplyingRemoteChange = true;
+        const day = local[activeTab];
+        $('editor').innerHTML = day.content || '';
+        currentTags = day.tags ? [...day.tags] : [];
+        renderTagsInEditor();
+        currentChecklist = day.checklist ? [...day.checklist] : [];
+        if (typeof renderChecklist === 'function') renderChecklist();
+        if (typeof renderGallery === 'function') renderGallery();
+        updateWC();
+        $('currentDaySubtitle').textContent = day.updatedAt ? `Última edição: ${new Date(day.updatedAt).toLocaleString('pt-BR')}` : 'Sincronizado';
+        isApplyingRemoteChange = false;
+      }
+    }
+    setSyncStatus('synced');
+  } catch (err) {
+    console.warn('checkAndSyncCloud warning:', err);
+    setSyncStatus('offline');
+  }
+}
 
 async function cloudSaveDay(key, content, tags, images, checklist) {
   if (!db || !currentUser) return;
   try {
+    setSyncStatus('syncing');
     await userDaysRef().doc(key).set({ 
-      content, 
+      content: content || '', 
       tags: tags || [], 
       images: images || [], 
       checklist: checklist || [], 
       updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
     }, { merge: true });
     setSyncStatus('synced');
-  } catch (e) { setSyncStatus('offline'); }
+  } catch (e) {
+    console.error('cloudSaveDay error:', e);
+    setSyncStatus('offline');
+  }
 }
+
 async function cloudDeleteDay(key) {
   if (!db || !currentUser) return;
   try { await userDaysRef().doc(key).delete(); } catch (e) { }
 }
+
 async function cloudLoadAll() {
   if (!db || !currentUser) return null;
   try {
@@ -101,14 +290,6 @@ async function cloudLoadAll() {
     setSyncStatus('synced');
     return result;
   } catch (e) { setSyncStatus('offline'); return null; }
-}
-function setSyncStatus(state) {
-  const bar = $('syncBar'); const txt = $('syncText');
-  if (!bar || !txt) return;
-  bar.className = 'sync-bar ' + state;
-  if (state === 'synced') txt.textContent = 'Sincronizado ✓';
-  else if (state === 'syncing') txt.textContent = 'Sincronizando...';
-  else txt.textContent = 'Modo local';
 }
 
 /* ────── Combined get/set (local + cloud) ────── */
@@ -536,6 +717,10 @@ function goOffline() {
 }
 
 function doLogout() {
+  if (realtimeUnsubscribe) {
+    try { realtimeUnsubscribe(); } catch (e) {}
+    realtimeUnsubscribe = null;
+  }
   if (auth) auth.signOut();
   currentUser = null;
   localStorage.setItem(SK_MODE, 'offline');
@@ -548,14 +733,28 @@ function doLogout() {
 }
 
 $('logoutBtn').addEventListener('click', () => {
+  if (!currentUser) {
+    showAuthScreen();
+    return;
+  }
   openModal({
     title: 'Sair da conta',
-    body: 'Deseja sair? Seus dados continuarão salvos.',
+    body: 'Deseja sair? Seus dados locais continuarão salvos.',
     actions: [
       { label: 'Cancelar', cls: 'btn-cancel' },
       { label: 'Sair', cls: 'btn-danger', cb: doLogout }
     ]
   });
+});
+
+$('mobileSyncIndicator')?.addEventListener('click', () => {
+  if (!currentUser) {
+    showToast('Modo offline ativo. Faça login para sincronizar com o PC!', true);
+    setTimeout(showAuthScreen, 600);
+  } else {
+    showToast(`Nuvem ativa (${currentUser.email || 'Conectado'}) · Sincronizando...`, false);
+    checkAndSyncCloud();
+  }
 });
 
 
@@ -608,12 +807,22 @@ function updateUserBar() {
     if (savedAvatar) $('userAvatar').innerHTML = '<img src="' + savedAvatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
     else $('userAvatar').textContent = (email[0] || '?').toUpperCase();
     $('userMode').textContent = FB_ON ? 'Sincronizado na nuvem' : 'Modo local';
+    const lBtn = $('logoutBtn');
+    if (lBtn) {
+      lBtn.title = 'Sair da conta';
+      lBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+    }
     setSyncStatus('synced');
   } else if (currentUser === null) {
     bar.style.display = 'flex';
     $('userEmail').textContent = 'Modo offline';
     $('userAvatar').innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
-    $('userMode').textContent = 'Dados salvos localmente';
+    $('userMode').textContent = 'Toque para entrar / sincronizar';
+    const lBtn = $('logoutBtn');
+    if (lBtn) {
+      lBtn.title = 'Fazer Login / Conectar';
+      lBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>';
+    }
     setSyncStatus('offline');
   } else {
     bar.style.display = 'none';
@@ -1042,7 +1251,7 @@ function renderTabs() {
 
 function openTab(key) {
   const d = loadLocal();
-  if (!d[key]) { d[key] = { content: '', updatedAt: new Date().toISOString(), tags: [] }; saveLocal(d); }
+  if (!d[key]) { d[key] = { content: '', updatedAt: null, tags: [], images: [], checklist: [] }; saveLocal(d); }
   if (!openTabs.includes(key)) openTabs.push(key);
   activateTab(key);
 }
@@ -1057,7 +1266,11 @@ function closeTab(key) {
   else { showWelcome(); renderSidebar($('searchInput').value); }
   renderCalendar();
 }
-function showWelcome() { $('welcome').style.display = 'flex'; $('editorPane').style.display = 'none'; }
+function showWelcome() { 
+  $('welcome').style.display = 'flex'; 
+  $('editorPane').style.display = 'none'; 
+  if ($('mobileHeaderTitle')) $('mobileHeaderTitle').textContent = 'PersonalMk';
+}
 
 let currentTags = [];
 let currentChecklist = [];
@@ -1066,16 +1279,24 @@ function showEditor(key) {
   $('welcome').style.display = 'none'; $('editorPane').style.display = 'flex';
   const day = localGetDay(key);
   $('editor').innerHTML = day.content || '';
-  $('currentDayTitle').textContent = fmtFull(key);
+  const title = fmtFull(key);
+  $('currentDayTitle').textContent = title;
+  if ($('mobileHeaderTitle')) $('mobileHeaderTitle').textContent = title;
   const upd = day.updatedAt ? new Date(day.updatedAt).toLocaleString('pt-BR') : null;
-  $('currentDaySubtitle').textContent = upd ? `Ultima edicao: ${upd}` : 'Nenhuma edicao ainda';
+  $('currentDaySubtitle').textContent = upd ? `Última edição: ${upd}` : 'Novo registro';
   currentTags = [...(day.tags || [])];
   currentChecklist = [...(day.checklist || [])];
   renderTagsInEditor();
-  if($('tabChecklist') && $('tabChecklist').classList.contains('active')) {
+  if ($('tabChecklist') && $('tabChecklist').classList.contains('active')) {
     renderChecklist();
   }
-  setSave('saved'); updateWC(); $('editor').focus();
+  if ($('tabGallery') && $('tabGallery').classList.contains('active')) {
+    renderGallery();
+  }
+  setSave('saved'); updateWC();
+  if (window.innerWidth > 768) {
+    $('editor').focus();
+  }
 }
 function setSave(s) {
   $('saveStatus').className = '';
@@ -1096,11 +1317,11 @@ function updateWC() {
   $('wc-chars').textContent = `${c} ${c === 1 ? 'caractere' : 'caracteres'}`;
 }
 async function saveCurrent() {
-  if (!activeTab) return;
+  if (!activeTab || isApplyingRemoteChange) return;
   const day = localGetDay(activeTab); 
   await setDay(activeTab, $('editor').innerHTML, currentTags, day.images, currentChecklist);
   setSave('saved'); renderSidebar($('searchInput').value); renderTagFilterBar(); renderCalendar();
-  $('currentDaySubtitle').textContent = `Ultima edicao: ${new Date().toLocaleString('pt-BR')}`;
+  $('currentDaySubtitle').textContent = `Última edição: ${new Date().toLocaleString('pt-BR')}`;
 }
 const doSave = debounce(saveCurrent, 700);
 function handleCalculator() {
@@ -2498,7 +2719,21 @@ async function dailyTick() {
   }
 }
 setInterval(dailyTick, 30000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) dailyTick(); });
+document.addEventListener('visibilitychange', () => { 
+  if (!document.hidden) {
+    dailyTick(); 
+    if (currentUser && FB_ON) checkAndSyncCloud();
+  }
+});
+window.addEventListener('focus', () => {
+  if (currentUser && FB_ON) checkAndSyncCloud();
+});
+window.addEventListener('online', () => {
+  if (currentUser && FB_ON) {
+    setSyncStatus('syncing');
+    checkAndSyncCloud();
+  }
+});
 
 function initDailyExtras() {
   checkReminders();
@@ -2508,20 +2743,10 @@ function initDailyExtras() {
 /* ────── App init (after auth) ────── */
 async function initApp() {
   updateUserBar();
-  // If cloud user, load from Firestore and merge with local
+  // If cloud user, start realtime sync and fetch data
   if (currentUser && FB_ON) {
-    const cloudData = await cloudLoadAll();
-    if (cloudData) {
-      const local = loadLocal();
-      // Merge: cloud wins on conflict (most recent updatedAt)
-      const merged = { ...local };
-      Object.entries(cloudData).forEach(([k, v]) => {
-        if (!merged[k] || (v.updatedAt && (!merged[k].updatedAt || v.updatedAt > merged[k].updatedAt))) {
-          merged[k] = v;
-        }
-      });
-      saveLocal(merged);
-    }
+    startRealtimeSync();
+    await checkAndSyncCloud();
   }
   refreshAll();
   const today = todayKey(); const data = loadLocal();
