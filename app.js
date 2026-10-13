@@ -140,10 +140,40 @@ function updateThemeBtn() {
   if (sb) sb.textContent = isL ? 'Mudar para Escuro' : 'Mudar para Claro';
 }
 
-/* ────── Tag colors ────── */
+/* ────── Tag colors & Palette ────── */
+const TAG_PALETTE = [
+  { name: 'blue',   bg: 'rgba(59, 130, 246, 0.16)', text: '#3b82f6', border: 'rgba(59, 130, 246, 0.35)' },
+  { name: 'green',  bg: 'rgba(16, 185, 129, 0.16)', text: '#10b981', border: 'rgba(16, 185, 129, 0.35)' },
+  { name: 'amber',  bg: 'rgba(245, 158, 11, 0.16)', text: '#f59e0b', border: 'rgba(245, 158, 11, 0.35)' },
+  { name: 'purple', bg: 'rgba(139, 92, 246, 0.16)', text: '#8b5cf6', border: 'rgba(139, 92, 246, 0.35)' },
+  { name: 'pink',   bg: 'rgba(236, 72, 153, 0.16)', text: '#ec4899', border: 'rgba(236, 72, 153, 0.35)' },
+  { name: 'teal',   bg: 'rgba(20, 184, 166, 0.16)', text: '#14b8a6', border: 'rgba(20, 184, 166, 0.35)' },
+  { name: 'coral',  bg: 'rgba(239, 68, 68, 0.16)',  text: '#ef4444', border: 'rgba(239, 68, 68, 0.35)' },
+  { name: 'indigo', bg: 'rgba(99, 102, 241, 0.16)', text: '#6366f1', border: 'rgba(99, 102, 241, 0.35)' },
+  { name: 'cyan',   bg: 'rgba(6, 182, 212, 0.16)',  text: '#06b6d4', border: 'rgba(6, 182, 212, 0.35)' },
+  { name: 'orange', bg: 'rgba(249, 115, 22, 0.16)', text: '#f97316', border: 'rgba(249, 115, 22, 0.35)' }
+];
+
+function getTagColors(tag) {
+  const clean = (tag || '').toLowerCase().trim();
+  if (/trabalho|work|trampo|job|empresa|reuniao|projeto/.test(clean)) return TAG_PALETTE[0];
+  if (/estudo|facul|curso|livro|ler|aula|escola/.test(clean)) return TAG_PALETTE[1];
+  if (/ideia|idea|insight|brainstorm|criativo/.test(clean)) return TAG_PALETTE[2];
+  if (/pessoal|vida|saude|treino|familia|casa/.test(clean)) return TAG_PALETTE[3];
+  if (/urgente|importante|meta|alerta|prioridade/.test(clean)) return TAG_PALETTE[6];
+  if (/financa|dinheiro|grana|invest|banco|pagar/.test(clean)) return TAG_PALETTE[5];
+
+  let hash = 0;
+  for (let i = 0; i < clean.length; i++) {
+    hash = (hash * 31 + clean.charCodeAt(i)) & 0xffffffff;
+  }
+  return TAG_PALETTE[Math.abs(hash) % TAG_PALETTE.length];
+}
+
 function renderTagChip(name, withDel) {
-  const del = withDel ? `<button class="tag-chip-del" data-tag="${esc(name)}" title="Remover">&#x00D7;</button>` : '';
-  return `<span class="tag-chip">#${esc(name)}${del}</span>`;
+  const c = getTagColors(name);
+  const del = withDel ? `<button class="tag-chip-del" data-tag="${esc(name)}" title="Remover" style="color:inherit;">&#x00D7;</button>` : '';
+  return `<span class="tag-chip" style="background:${c.bg}; color:${c.text}; border-color:${c.border};">#${esc(name)}${del}</span>`;
 }
 
 /* ────── Toast ────── */
@@ -239,17 +269,44 @@ function setAILoading(btnId, isLoading, originalText) {
   if (!btn) return;
   if (isLoading) {
     btn.disabled = true;
-    btn.textContent = 'Processando...';
+    btn.dataset.origHtml = btn.innerHTML;
+    btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;"><div class="auth-spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;"></div> Processando...</span>';
     $('editor').contentEditable = "false";
   } else {
     btn.disabled = false;
-    btn.textContent = originalText;
+    if (btn.dataset.origHtml) btn.innerHTML = btn.dataset.origHtml;
+    else if (originalText) btn.textContent = originalText;
     $('editor').contentEditable = "true";
     $('ai-overlay').classList.remove('show');
   }
 }
 
-// AI Action: Improve Text
+// AI Action 1: Gerar Resumo em Tópicos (3 bullets)
+if ($('aiBtnSummarize')) {
+  $('aiBtnSummarize').addEventListener('click', async () => {
+    const text = $('editor').innerText;
+    if (!text.trim()) return showToast('Anotação vazia.', true);
+
+    setAILoading('aiBtnSummarize', true);
+
+    try {
+      const prompt = `Resuma o texto da seguinte anotação em EXATAMENTE 3 tópicos (bullet points) objetivos, claros e diretos. Cada tópico DEVE começar com "• ". Não adicione títulos, saudações nem introduções. Texto:\n\n${text}`;
+      const result = await callGemini(prompt);
+      if (result) {
+        let htmlResult = '<br><div class="ai-summary-block"><strong>📌 Resumo em 3 Tópicos:</strong><br>';
+        htmlResult += result.trim().replace(/\n+/g, '<br>') + '</div><br>';
+        $('editor').innerHTML += htmlResult;
+        doSave();
+        updateWC();
+        showToast('Resumo em 3 tópicos gerado!', false);
+      }
+    } finally {
+      setAILoading('aiBtnSummarize', false);
+    }
+  });
+}
+
+// AI Action 2: Corrigir e Melhorar Escrita
 if ($('aiBtnImprove')) {
   $('aiBtnImprove').addEventListener('click', async () => {
     const sel = window.getSelection();
@@ -266,10 +323,10 @@ if ($('aiBtnImprove')) {
       return;
     }
 
-    setAILoading('aiBtnImprove', true, 'Melhorar Texto Selecionado');
+    setAILoading('aiBtnImprove', true);
 
     try {
-      const prompt = `Melhore o seguinte texto corrigindo erros gramaticais e deixando-o mais claro e profissional. Mantenha a mesma linguagem e tom original. Responda apenas com o texto melhorado:\n\n${text}`;
+      const prompt = `Corrija e melhore a escrita do texto a seguir, ajustando com precisão a pontuação, acentuação e gramática. Mantenha fielmente o tom, o sentido e a intenção originais. Responda APENAS com o texto corrigido, sem explicações, saudações ou aspas:\n\n${text}`;
       const result = await callGemini(prompt);
       if (result) {
         if (isSelection) {
@@ -279,57 +336,89 @@ if ($('aiBtnImprove')) {
         }
         doSave();
         updateWC();
-        showToast('Texto melhorado!', false);
+        showToast('Texto corrigido e aprimorado!', false);
       }
     } finally {
-      setAILoading('aiBtnImprove', false, 'Melhorar Texto Selecionado');
+      setAILoading('aiBtnImprove', false);
     }
   });
 }
 
-// AI Action: Summarize
-if ($('aiBtnSummarize')) {
-  $('aiBtnSummarize').addEventListener('click', async () => {
+// AI Action 3: Extrair Tarefas / To-Do
+if ($('aiBtnExtractTodos')) {
+  $('aiBtnExtractTodos').addEventListener('click', async () => {
     const text = $('editor').innerText;
     if (!text.trim()) return showToast('Anotação vazia.', true);
 
-    setAILoading('aiBtnSummarize', true, 'Resumir o Dia');
+    setAILoading('aiBtnExtractTodos', true);
 
     try {
-      const prompt = `Resuma os pontos principais do seguinte diário/anotação em um formato de lista com tópicos markdown (bullet points). Seja conciso. Anotação:\n\n${text}`;
+      const prompt = `Varra o texto a seguir procurando todas as pendências, tarefas e compromissos. Retorne cada tarefa em uma linha começando com "- [ ] ". Se houver horário no texto (ex: 14:00, às 10h), coloque no final da linha no formato "(HH:MM)". Responda APENAS com a lista de tarefas, sem saudações ou explicações:\n\n${text}`;
       const result = await callGemini(prompt);
       if (result) {
-        let htmlResult = '<br><br><strong>Resumo da IA:</strong><br>';
-        htmlResult += result.replace(/\n/g, '<br>');
-        $('editor').innerHTML += htmlResult;
-        doSave();
-        updateWC();
-        showToast('Resumo gerado!', false);
+        const lines = result.split('\n').map(l => l.trim()).filter(Boolean);
+        let count = 0;
+        lines.forEach(line => {
+          const clean = line.replace(/^[-\*\•\d\.\s\[\]]+/, '').trim();
+          if (clean) {
+            let taskTime = '';
+            const timeMatch = clean.match(/\(([0-2]?[0-9]:[0-5][0-9])\)/);
+            let finalDesc = clean;
+            if (timeMatch) {
+              taskTime = timeMatch[1];
+              finalDesc = clean.replace(timeMatch[0], '').trim();
+            }
+            currentChecklist.push({ text: finalDesc, time: taskTime, done: false, notified: false });
+            count++;
+          }
+        });
+
+        if (count > 0) {
+          saveCurrent();
+          if ($('tabChecklist')) renderChecklist();
+          showToast(`${count} tarefa(s) extraída(s) para a aba Tarefas!`, false);
+        } else {
+          showToast('Nenhuma pendência identificada no texto.', true);
+        }
       }
     } finally {
-      setAILoading('aiBtnSummarize', false, 'Resumir o Dia');
+      setAILoading('aiBtnExtractTodos', false);
     }
   });
 }
+
+// AI Action 4: Sugerir Tags / Categorias
 if ($('aiBtnTags')) {
   $('aiBtnTags').addEventListener('click', async () => {
     const text = $('editor').innerText;
     if (!text.trim()) return showToast('Anotação vazia.', true);
 
-    setAILoading('aiBtnTags', true, 'Gerar Auto-Tags');
+    setAILoading('aiBtnTags', true);
 
     try {
-      const prompt = `Leia a anotação abaixo e gere até 5 palavras-chave (tags) relevantes. Responda APENAS com as tags separadas por vírgula, sem usar o símbolo #. Exemplo: estudo, trabalho, reunião.\n\n${text}`;
+      const prompt = `Leia a anotação abaixo e sugira EXATAMENTE 3 palavras-chave (tags) concisas e relevantes em português para categorizá-la. Responda APENAS com as 3 palavras separadas por vírgula, todas em letras minúsculas, sem o caractere # e sem acentos ou caracteres especiais. Exemplo: trabalho, reuniao, financas.\n\n${text}`;
       const result = await callGemini(prompt);
       if (result) {
-        const newTags = result.split(',').map(t => t.trim().toLowerCase().replace(/[^a-z0-9_\-àáâãéêíóôõúç]/gi, '')).filter(t => t.length > 0);
-        newTags.forEach(t => { if (!currentTags.includes(t)) currentTags.push(t); });
+        const newTags = result.split(',')
+          .map(t => t.trim().toLowerCase().replace(/[^a-z0-9_\-àáâãéêíóôõúç]/gi, ''))
+          .filter(t => t.length > 0)
+          .slice(0, 3);
+
+        let addedCount = 0;
+        newTags.forEach(t => {
+          if (!currentTags.includes(t)) {
+            currentTags.push(t);
+            addedCount++;
+          }
+        });
+
         renderTagsInEditor();
+        renderTagFilterBar();
         doSave();
-        showToast(`${newTags.length} tag(s) gerada(s)!`, false);
+        showToast(`${addedCount || newTags.length} tag(s) vinculada(s) à nota!`, false);
       }
     } finally {
-      setAILoading('aiBtnTags', false, 'Gerar Auto-Tags');
+      setAILoading('aiBtnTags', false);
     }
   });
 }
@@ -355,6 +444,9 @@ $('settingsBtn').addEventListener('click', openSettings);
 $('settingsThemeBtn').addEventListener('click', () => { toggleTheme(); });
 $('settingsBackupBtn').addEventListener('click', () => { closeSettings(); doBackup(); });
 $('settingsRestoreBtn').addEventListener('click', () => { closeSettings(); doRestore(); });
+if ($('settingsExportMdBtn')) {
+  $('settingsExportMdBtn').addEventListener('click', () => { closeSettings(); exportAllMarkdown(); });
+}
 
 /* ────── AUTH SCREEN ────── */
 let authMode = 'login';
@@ -525,59 +617,313 @@ function updateUserBar() {
     bar.style.display = 'none';
   }
 }
+/* ────── Fuzzy Search Engine ────── */
+function normalizeStr(str) {
+  return (str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function levenshteinDist(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+
+  const row = [];
+  for (let i = 0; i <= b.length; i++) row[i] = i;
+
+  for (let i = 1; i <= a.length; i++) {
+    let prev = i;
+    for (let j = 1; j <= b.length; j++) {
+      let val;
+      if (a[i - 1] === b[j - 1]) {
+        val = row[j - 1];
+      } else {
+        val = Math.min(row[j - 1] + 1, prev + 1, row[j] + 1);
+      }
+      row[j - 1] = prev;
+      prev = val;
+    }
+    row[b.length] = prev;
+  }
+  return row[b.length];
+}
+
+function fuzzyMatch(targetText, query) {
+  const normTarget = normalizeStr(targetText);
+  const normQuery = normalizeStr(query);
+  if (!normQuery) return true;
+  if (!normTarget) return false;
+
+  // Direct substring match
+  if (normTarget.includes(normQuery)) return true;
+
+  const qTokens = normQuery.split(/\s+/).filter(Boolean);
+  const tTokens = normTarget.split(/[\s,.;:!?\-_/\\()\[\]{}'"]+/).filter(Boolean);
+
+  return qTokens.every(qTok => {
+    if (qTok.length <= 2) {
+      return normTarget.includes(qTok);
+    }
+    return tTokens.some(tTok => {
+      if (tTok.includes(qTok) || qTok.includes(tTok)) return true;
+      const maxDist = qTok.length >= 6 ? 2 : (qTok.length >= 4 ? 1 : 0);
+      if (Math.abs(tTok.length - qTok.length) <= maxDist) {
+        return levenshteinDist(qTok, tTok) <= maxDist;
+      }
+      return false;
+    });
+  });
+}
+
+function fuzzySearchNotes(query, activeTag) {
+  const rawQ = (query || '').trim();
+  const isTagOnly = rawQ.startsWith('#');
+  const cleanQ = isTagOnly ? rawQ.slice(1) : rawQ;
+
+  const data = loadLocal();
+  const keys = Object.keys(data).sort().reverse();
+
+  const results = [];
+  keys.forEach(k => {
+    const day = data[k] || {};
+    const tags = day.tags || [];
+    const content = toPlain(day.content || '');
+    const checklistTexts = (day.checklist || []).map(item => item.text || '').join(' ');
+    const fullDate = fmtFull(k);
+    const shortDate = fmtShort(k);
+
+    if (activeTag && !tags.includes(activeTag)) return;
+
+    if (!cleanQ) {
+      results.push({ key: k, day, matchScore: 1, preview: content.slice(0, 75).trim() || 'Sem conteúdo' });
+      return;
+    }
+
+    if (isTagOnly) {
+      const matchTag = tags.some(t => fuzzyMatch(t, cleanQ));
+      if (matchTag) {
+        results.push({ key: k, day, matchScore: 2, preview: content.slice(0, 75).trim() || 'Sem conteúdo' });
+      }
+      return;
+    }
+
+    const dateMatch = fuzzyMatch(fullDate, cleanQ) || fuzzyMatch(shortDate, cleanQ) || fuzzyMatch(k, cleanQ);
+    const tagMatch = tags.some(t => fuzzyMatch(t, cleanQ));
+    const contentMatch = fuzzyMatch(content, cleanQ);
+    const checkMatch = fuzzyMatch(checklistTexts, cleanQ);
+
+    if (dateMatch || tagMatch || contentMatch || checkMatch) {
+      let score = 1;
+      if (dateMatch) score += 3;
+      if (tagMatch) score += 2;
+      if (contentMatch) score += 1;
+
+      let preview = content.slice(0, 75).trim();
+      const normContent = normalizeStr(content);
+      const normQ = normalizeStr(cleanQ);
+      const idx = normContent.indexOf(normQ);
+      if (idx !== -1) {
+        const start = Math.max(0, idx - 25);
+        const end = Math.min(content.length, idx + normQ.length + 50);
+        preview = (start > 0 ? '...' : '') + content.slice(start, end).trim() + (end < content.length ? '...' : '');
+      }
+
+      results.push({ key: k, day, matchScore: score, preview: preview || 'Sem conteúdo' });
+    }
+  });
+
+  return results.sort((a, b) => b.matchScore - a.matchScore);
+}
+
 let activeTagFilter = null;
 function renderTagFilterBar() {
   const all = new Set();
   Object.values(loadLocal()).forEach(d => (d.tags || []).forEach(t => all.add(t)));
   const bar = $('tagFilterBar');
   if (!all.size) { bar.innerHTML = ''; return; }
-  bar.innerHTML = [...all].map(t => {
-    const ac = activeTagFilter === t ? ' active' : '';
-    return `<span class="tag-filter-chip${ac}" data-tag="${esc(t)}">#${esc(t)}</span>`;
+
+  let html = [...all].map(t => {
+    const c = getTagColors(t);
+    const isAct = activeTagFilter === t;
+    const ac = isAct ? ' active' : '';
+    const style = isAct
+      ? `background:${c.text}; color:#ffffff; border-color:${c.text};`
+      : `background:${c.bg}; color:${c.text}; border-color:${c.border};`;
+    return `<span class="tag-filter-chip${ac}" data-tag="${esc(t)}" style="${style}">#${esc(t)}</span>`;
   }).join('');
+
+  if (activeTagFilter) {
+    html += `<span class="tag-filter-clear" id="tagFilterClearBtn" title="Limpar filtro de tag">&#x00D7; Limpar</span>`;
+  }
+
+  bar.innerHTML = html;
+
   bar.querySelectorAll('.tag-filter-chip').forEach(el => {
     el.addEventListener('click', () => {
       activeTagFilter = activeTagFilter === el.dataset.tag ? null : el.dataset.tag;
-      renderTagFilterBar(); renderSidebar($('searchInput').value);
+      renderTagFilterBar();
+      renderSidebar($('searchInput').value);
     });
   });
+
+  const clearBtn = $('tagFilterClearBtn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      activeTagFilter = null;
+      renderTagFilterBar();
+      renderSidebar($('searchInput').value);
+    });
+  }
 }
 
 function renderSidebar(filter) {
-  const q = (filter || '').trim().toLowerCase();
-  const isTagQ = q.startsWith('#'); const tagQ = isTagQ ? q.slice(1) : '';
-  const data = loadLocal(); const keys = Object.keys(data).sort().reverse();
-  const filtered = keys.filter(k => {
-    const day = data[k]; const tags = day.tags || [];
-    if (activeTagFilter && !tags.includes(activeTagFilter)) return false;
-    if (!q) return true;
-    if (isTagQ) return tags.some(t => t.toLowerCase().includes(tagQ));
-    return fmtFull(k).toLowerCase().includes(q) || toPlain(day.content || '').toLowerCase().includes(q);
-  });
-  if (!filtered.length) {
-    $('daysList').innerHTML = `<div class="empty-msg">${q || activeTagFilter ? 'Nenhum resultado.' : 'Nenhuma anotação ainda.<br>Clique em <b>Nova Anotação</b>.'}</div>`;
+  const results = fuzzySearchNotes(filter, activeTagFilter);
+  if (!results.length) {
+    $('daysList').innerHTML = `<div class="empty-msg">${filter || activeTagFilter ? 'Nenhum resultado encontrado.' : 'Nenhuma anotação ainda.<br>Clique em <b>Nova Anotação</b>.'}</div>`;
     return;
   }
-  $('daysList').innerHTML = filtered.map(k => {
-    const d = data[k]; const c = d.content || ''; const tags = d.tags || [];
-    const preview = toPlain(c).slice(0, 52).trim() || 'Sem conteúdo';
-    const ac = k === activeTab ? ' active' : ''; const hc = c.trim().length ? ' has-content' : '';
-    const chips = tags.slice(0, 2).map(t => { return `<span class="day-tag-chip">#${esc(t)}</span>`; }).join('');
+
+  $('daysList').innerHTML = results.map(item => {
+    const k = item.key;
+    const d = item.day;
+    const c = d.content || '';
+    const tags = d.tags || [];
+    const preview = item.preview || toPlain(c).slice(0, 52).trim() || 'Sem conteúdo';
+    const ac = k === activeTab ? ' active' : '';
+    const hc = c.trim().length ? ' has-content' : '';
+
+    const chips = tags.slice(0, 2).map(t => {
+      const col = getTagColors(t);
+      return `<span class="day-tag-chip" data-tag="${esc(t)}" style="background:${col.bg}; color:${col.text}; border-color:${col.border};">#${esc(t)}</span>`;
+    }).join('');
+
     return `<div class="day-item${ac}${hc}" data-key="${k}" tabindex="0">
       <div class="day-dot"></div>
       <div class="day-item-info">
         <div class="day-item-date">${esc(fmtShort(k))}</div>
         <div class="day-item-meta">${chips}<span class="day-item-preview">${esc(preview)}</span></div>
       </div>
-      <button class="day-item-del" data-del="${k}">&#x00D7;</button>
+      <button class="day-item-del" data-del="${k}" title="Excluir anotação">&#x00D7;</button>
     </div>`;
   }).join('');
+
   $('daysList').querySelectorAll('.day-item').forEach(el => {
-    el.addEventListener('click', e => { if (e.target.closest('.day-item-del')) return; openTab(el.dataset.key); });
+    el.addEventListener('click', e => {
+      if (e.target.closest('.day-item-del')) return;
+      if (e.target.closest('.day-tag-chip')) {
+        const tag = e.target.closest('.day-tag-chip').dataset.tag;
+        activeTagFilter = activeTagFilter === tag ? null : tag;
+        renderTagFilterBar();
+        renderSidebar($('searchInput').value);
+        return;
+      }
+      openTab(el.dataset.key);
+    });
     el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') openTab(el.dataset.key); });
   });
+
   $('daysList').querySelectorAll('.day-item-del').forEach(btn => {
     btn.addEventListener('click', e => { e.stopPropagation(); confirmDelete(btn.dataset.del); });
+  });
+}
+
+/* ────── Quick Search Modal (Ctrl+K / /) ────── */
+let quickSearchSelectedIdx = 0;
+let quickSearchResultsList = [];
+
+function openQuickSearch() {
+  const overlay = $('quicksearch-overlay');
+  const input = $('quickSearchInput');
+  if (!overlay || !input) return;
+  overlay.classList.add('show');
+  input.value = '';
+  quickSearchSelectedIdx = 0;
+  renderQuickSearchResults('');
+  setTimeout(() => input.focus(), 60);
+}
+
+function closeQuickSearch() {
+  const overlay = $('quicksearch-overlay');
+  if (overlay) overlay.classList.remove('show');
+}
+
+function renderQuickSearchResults(query) {
+  const container = $('quickSearchResults');
+  if (!container) return;
+
+  quickSearchResultsList = fuzzySearchNotes(query, null);
+  if (!quickSearchResultsList.length) {
+    container.innerHTML = `<div class="quicksearch-empty">Nenhuma anotação encontrada para "<b>${esc(query)}</b>"</div>`;
+    return;
+  }
+
+  if (quickSearchSelectedIdx >= quickSearchResultsList.length) {
+    quickSearchSelectedIdx = 0;
+  }
+
+  container.innerHTML = quickSearchResultsList.slice(0, 15).map((item, idx) => {
+    const isAct = idx === quickSearchSelectedIdx ? ' active' : '';
+    const tags = (item.day.tags || []).slice(0, 3).map(t => {
+      const c = getTagColors(t);
+      return `<span class="day-tag-chip" style="background:${c.bg}; color:${c.text}; border-color:${c.border}; font-size:10px;">#${esc(t)}</span>`;
+    }).join('');
+
+    return `<div class="quicksearch-item${isAct}" data-idx="${idx}" data-key="${item.key}">
+      <div class="quicksearch-item-top">
+        <div class="quicksearch-item-date">${esc(fmtFull(item.key))}</div>
+        <div class="quicksearch-item-tags">${tags}</div>
+      </div>
+      <div class="quicksearch-item-preview">${esc(item.preview)}</div>
+    </div>`;
+  }).join('');
+
+  container.querySelectorAll('.quicksearch-item').forEach(el => {
+    el.addEventListener('click', () => {
+      openTab(el.dataset.key);
+      closeQuickSearch();
+    });
+  });
+}
+
+if ($('quickSearchInput')) {
+  $('quickSearchInput').addEventListener('input', e => {
+    quickSearchSelectedIdx = 0;
+    renderQuickSearchResults(e.target.value);
+  });
+
+  $('quickSearchInput').addEventListener('keydown', e => {
+    const items = $('quickSearchResults')?.querySelectorAll('.quicksearch-item');
+    if (!items || !items.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      quickSearchSelectedIdx = (quickSearchSelectedIdx + 1) % items.length;
+      items.forEach((el, idx) => el.classList.toggle('active', idx === quickSearchSelectedIdx));
+      items[quickSearchSelectedIdx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      quickSearchSelectedIdx = (quickSearchSelectedIdx - 1 + items.length) % items.length;
+      items.forEach((el, idx) => el.classList.toggle('active', idx === quickSearchSelectedIdx));
+      items[quickSearchSelectedIdx]?.scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const activeEl = items[quickSearchSelectedIdx];
+      if (activeEl) {
+        openTab(activeEl.dataset.key);
+        closeQuickSearch();
+      }
+    } else if (e.key === 'Escape') {
+      closeQuickSearch();
+    }
+  });
+}
+
+if ($('quicksearch-overlay')) {
+  $('quicksearch-overlay').addEventListener('click', e => {
+    if (e.target === $('quicksearch-overlay')) closeQuickSearch();
   });
 }
 
@@ -842,16 +1188,161 @@ function confirmDelete(key) {
 }
 $('deleteCurrentBtn').addEventListener('click', () => { if (activeTab) confirmDelete(activeTab); });
 
-/* ────── Export TXT ────── */
+/* ────── Markdown Converter & Export ────── */
+function htmlToMarkdown(html) {
+  if (!html) return '';
+  const div = document.createElement('div');
+  div.innerHTML = html;
+
+  function nodeToMd(node) {
+    if (node.nodeType === Node.TEXT_NODE) return node.textContent;
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+
+    const tag = node.tagName.toLowerCase();
+    const children = Array.from(node.childNodes).map(nodeToMd).join('');
+
+    switch (tag) {
+      case 'h1': return `\n# ${children.trim()}\n\n`;
+      case 'h2': return `\n## ${children.trim()}\n\n`;
+      case 'h3': return `\n### ${children.trim()}\n\n`;
+      case 'b':
+      case 'strong': return `**${children}**`;
+      case 'i':
+      case 'em': return `*${children}*`;
+      case 'u': return `<u>${children}</u>`;
+      case 's':
+      case 'strike': return `~~${children}~~`;
+      case 'code': return `\`${children}\``;
+      case 'blockquote': return `\n> ${children.trim()}\n\n`;
+      case 'hr': return `\n---\n\n`;
+      case 'br': return `\n`;
+      case 'p':
+      case 'div': return `\n${children}\n`;
+      case 'ul': return `\n${children}\n`;
+      case 'ol': return `\n${children}\n`;
+      case 'li': {
+        const parent = node.parentElement;
+        if (parent && parent.tagName.toLowerCase() === 'ol') {
+          const idx = Array.from(parent.children).indexOf(node) + 1;
+          return `${idx}. ${children.trim()}\n`;
+        }
+        return `- ${children.trim()}\n`;
+      }
+      default: return children;
+    }
+  }
+
+  let md = nodeToMd(div);
+  return md.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function exportNoteMarkdown(key) {
+  const day = localGetDay(key);
+  const tagsStr = (day.tags || []).map(t => `#${t}`).join(' ') || 'nenhuma';
+  const updStr = day.updatedAt ? new Date(day.updatedAt).toLocaleString('pt-BR') : 'Sem registro';
+  const mdContent = htmlToMarkdown(day.content || '');
+
+  let checkMd = '';
+  if (day.checklist && day.checklist.length > 0) {
+    checkMd = `\n\n### Tarefas & Checklist\n`;
+    day.checklist.forEach(item => {
+      const mark = item.done ? '[x]' : '[ ]';
+      const timeStr = item.time ? ` (${item.time})` : '';
+      checkMd += `- ${mark} ${item.text}${timeStr}\n`;
+    });
+  }
+
+  const fileText = `# PersonalMk - ${fmtFull(key)}\n\n` +
+    `> **Data:** ${key}\n` +
+    `> **Última Atualização:** ${updStr}\n` +
+    `> **Tags:** ${tagsStr}\n\n` +
+    `---\n\n` +
+    `${mdContent}${checkMd}\n\n` +
+    `---\n` +
+    `*Exportado de PersonalMk em ${new Date().toLocaleString('pt-BR')}*\n`;
+
+  const blob = new Blob([fileText], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `personalmk_${key}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Anotação exportada em Markdown (.md)!', '📄');
+}
+
+function exportAllMarkdown() {
+  const data = loadLocal();
+  const keys = Object.keys(data).sort().reverse();
+  if (!keys.length) return toast('Nenhuma anotação para exportar.', '!');
+
+  let fullMd = `# PersonalMk - Backup Completo de Anotações\n\n` +
+    `> **Total de Anotações:** ${keys.length}\n` +
+    `> **Gerado em:** ${new Date().toLocaleString('pt-BR')}\n` +
+    `> **Versão:** 3.0\n\n` +
+    `---\n\n` +
+    `## Índice de Anotações\n\n`;
+
+  keys.forEach(k => {
+    fullMd += `- [${fmtFull(k)}](#${k})\n`;
+  });
+
+  fullMd += `\n---\n\n`;
+
+  keys.forEach(k => {
+    const day = data[k] || {};
+    const tagsStr = (day.tags || []).map(t => `#${t}`).join(' ') || 'nenhuma';
+    const updStr = day.updatedAt ? new Date(day.updatedAt).toLocaleString('pt-BR') : 'Sem registro';
+    const mdContent = htmlToMarkdown(day.content || '');
+
+    let checkMd = '';
+    if (day.checklist && day.checklist.length > 0) {
+      checkMd = `\n\n### Tarefas\n`;
+      day.checklist.forEach(item => {
+        const mark = item.done ? '[x]' : '[ ]';
+        const timeStr = item.time ? ` (${item.time})` : '';
+        checkMd += `- ${mark} ${item.text}${timeStr}\n`;
+      });
+    }
+
+    fullMd += `<a id="${k}"></a>\n\n` +
+      `# ${fmtFull(k)}\n\n` +
+      `> **Data:** ${k} | **Atualizado:** ${updStr}\n` +
+      `> **Tags:** ${tagsStr}\n\n` +
+      `${mdContent}${checkMd}\n\n` +
+      `---\n\n`;
+  });
+
+  const blob = new Blob([fullMd], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `personalmk_backup_todas_notas_${todayKey()}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`${keys.length} anotações exportadas em Markdown (.md)!`, '📄');
+}
+
+/* ────── Export Note Button ────── */
 $('exportBtn').addEventListener('click', () => {
   if (!activeTab) return;
-  const day = localGetDay(activeTab);
-  const tags = (day.tags || []).map(t => `#${t}`).join(' ');
-  const txt = `AGENDA PESSOAL - ${fmtFull(activeTab)}\n${'='.repeat(52)}\nTags: ${tags || 'nenhuma'}\n\n${toPlain(day.content)}`;
-  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `agenda_${activeTab}.txt`; a.click();
-  URL.revokeObjectURL(url); toast('Exportado!', '');
+  openModal({
+    title: 'Exportar Anotação',
+    body: `Como deseja exportar "${fmtShort(activeTab)}"?`,
+    actions: [
+      { label: 'Cancelar', cls: 'btn-cancel' },
+      { label: 'Markdown (.md)', cls: 'btn-primary', cb: () => exportNoteMarkdown(activeTab) },
+      { label: 'Texto (.txt)', cls: 'btn-secondary', cb: () => {
+        const day = localGetDay(activeTab);
+        const tags = (day.tags || []).map(t => `#${t}`).join(' ');
+        const txt = `AGENDA PESSOAL - ${fmtFull(activeTab)}\n${'='.repeat(52)}\nTags: ${tags || 'nenhuma'}\n\n${toPlain(day.content)}`;
+        const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `agenda_${activeTab}.txt`; a.click();
+        URL.revokeObjectURL(url); toast('Exportado em TXT!', '');
+      }}
+    ]
+  });
 });
 
 /* ────── Backup / Restore ────── */
@@ -905,12 +1396,65 @@ $('searchInput').addEventListener('input', () => renderSidebar($('searchInput').
 /* ────── Theme toggle ────── */
 $('themeToggleBtn').addEventListener('click', toggleTheme);
 
-/* ────── Ctrl+Tab ────── */
-document.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
+/* ────── Keyboard Navigation Shortcuts (Power User) ────── */
+window.addEventListener('keydown', e => {
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const modKey = isMac ? e.metaKey : e.ctrlKey;
+
+  // 1. Ctrl/Cmd + Tab: Alternar entre abas
+  if (modKey && e.key === 'Tab') {
     e.preventDefault();
     if (openTabs.length < 2) return;
     activateTab(openTabs[(openTabs.indexOf(activeTab) + 1) % openTabs.length]);
+    return;
+  }
+
+  // 2. Ctrl/Cmd + N: Criar nova anotação
+  if (modKey && e.key.toLowerCase() === 'n') {
+    e.preventDefault();
+    pickDateModal();
+    return;
+  }
+
+  // 3. Ctrl/Cmd + S: Forçar salvamento visual imediato
+  if (modKey && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    if (activeTab) {
+      setSave('saving');
+      saveCurrent().then(() => {
+        setSave('saved');
+        toast('Anotação salva com sucesso!', '✓');
+      });
+    }
+    return;
+  }
+
+  // 4. Ctrl/Cmd + K ou / : Busca rápida
+  const isTyping = document.activeElement && (
+    document.activeElement.tagName === 'INPUT' ||
+    document.activeElement.tagName === 'TEXTAREA' ||
+    document.activeElement.isContentEditable
+  );
+
+  if ((modKey && e.key.toLowerCase() === 'k') || (!isTyping && e.key === '/')) {
+    e.preventDefault();
+    openQuickSearch();
+    return;
+  }
+
+  // 5. Escape: Fechar modais abertos
+  if (e.key === 'Escape') {
+    if ($('quicksearch-overlay') && $('quicksearch-overlay').classList.contains('show')) {
+      closeQuickSearch();
+    } else if ($('ai-overlay') && $('ai-overlay').classList.contains('show')) {
+      $('ai-overlay').classList.remove('show');
+    } else if ($('settings-overlay') && $('settings-overlay').classList.contains('show')) {
+      closeSettings();
+    } else if ($('modal-overlay') && $('modal-overlay').classList.contains('show')) {
+      closeModal();
+    } else if ($('lightbox') && $('lightbox').classList.contains('show')) {
+      $('lightbox').classList.remove('show');
+    }
   }
 });
 
