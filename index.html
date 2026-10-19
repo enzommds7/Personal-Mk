@@ -35,48 +35,90 @@
 
 
   <div id="authScreen" style="display:none;">
-    <div class="auth-card">
-      <div class="auth-logo">
-        <div class="auth-logo-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2">
+    <header class="auth-navbar">
+      <div class="auth-brand">
+        <div class="auth-logo-badge">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
-          </svg></div>
-        <div>
-          <h1>PersonalMk</h1>
-          <span>Suas recordações, em qualquer lugar.</span>
+          </svg>
         </div>
+        <span class="auth-brand-name">PersonalMk</span>
       </div>
-      <div class="auth-tabs">
-        <button class="auth-tab active" id="tabLogin">Login</button>
-        <button class="auth-tab" id="tabRegister">Criar Conta</button>
+      <div class="auth-nav-actions">
+        <button class="auth-theme-btn" id="authThemeToggleBtn" type="button" title="Alternar tema (Claro / Escuro)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5" />
+            <line x1="12" y1="1" x2="12" y2="3" />
+            <line x1="12" y1="21" x2="12" y2="23" />
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+            <line x1="1" y1="12" x2="3" y2="12" />
+            <line x1="21" y1="12" x2="23" y2="12" />
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+          </svg>
+        </button>
+        <button class="auth-nav-offline-btn" id="authNavOfflineBtn" type="button">Usar offline</button>
       </div>
-      <div class="auth-field">
-        <label>Email</label>
-        <input class="auth-input" id="authEmail" type="email" placeholder="seu@email.com" autocomplete="email" />
+    </header>
+
+    <div class="auth-container">
+      <div class="auth-hero">
+        <h1 class="auth-hero-title">
+          Onde suas recordações e planos<br>
+          <span class="auth-hero-pill"><span class="auth-hero-dot"></span>vivem juntos.</span>
+        </h1>
+        <p class="auth-hero-sub">
+          Registre seu dia, organize suas tarefas e acesse de qualquer lugar, sempre sincronizado entre seu celular e PC.
+        </p>
       </div>
-      <div class="auth-field">
-        <label>Senha</label>
-        <div class="auth-input-wrap">
-          <input class="auth-input pass" id="authPassword" type="password" placeholder="••••••••"
-            autocomplete="current-password" />
-          <button class="pass-toggle" id="passToggle" tabindex="-1">&#x1F441;</button>
+
+      <div class="auth-card">
+        <div class="auth-tabs">
+          <button class="auth-tab active" id="tabLogin" type="button">Entrar</button>
+          <button class="auth-tab" id="tabRegister" type="button">Criar Conta</button>
         </div>
+
+        <div class="auth-field">
+          <label for="authEmail">Email</label>
+          <input class="auth-input" id="authEmail" type="email" placeholder="seu@email.com" autocomplete="email" />
+        </div>
+
+        <div class="auth-field">
+          <label for="authPassword">Senha</label>
+          <div class="auth-input-wrap">
+            <input class="auth-input pass" id="authPassword" type="password" placeholder="••••••••" autocomplete="current-password" />
+            <button class="pass-toggle" id="passToggle" type="button" tabindex="-1" title="Mostrar/ocultar senha">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="auth-field" id="confirmField" style="display:none;">
+          <label for="authConfirm">Confirmar senha</label>
+          <input class="auth-input pass" id="authConfirm" type="password" placeholder="••••••••" autocomplete="new-password" />
+        </div>
+
+        <div class="auth-err" id="authErr"></div>
+
+        <button class="auth-btn" id="authSubmitBtn" type="button">
+          <span id="authBtnLabel">Entrar no PersonalMk</span>
+        </button>
+
+        <div class="auth-divider">ou</div>
+
+        <button class="auth-offline" id="authOfflineBtn" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+            <line x1="8" y1="21" x2="16" y2="21" />
+            <line x1="12" y1="17" x2="12" y2="21" />
+          </svg>
+          Continuar no dispositivo (modo offline)
+        </button>
       </div>
-      <div class="auth-field" id="confirmField" style="display:none;">
-        <label>Confirmar senha</label>
-        <input class="auth-input pass" id="authConfirm" type="password" placeholder="••••••••" />
-      </div>
-      <div class="auth-err" id="authErr"></div>
-      <button class="auth-btn glass-btn" id="authSubmitBtn">
-        <span id="authBtnLabel">Entrar</span>
-      </button>
-      <div class="auth-divider">ou</div>
-      <button class="auth-offline" id="authOfflineBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 5px;">
-          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
-          <polyline points="17 21 17 13 7 13 7 21" />
-          <polyline points="7 3 7 8 15 8" />
-        </svg> Usar sem LOGIN (modo offline)</button>
     </div>
   </div>
 
@@ -209,6 +251,9 @@
           <div class="mobile-sync-badge offline" id="mobileSyncIndicator" title="Status de sincronização"></div>
         </div>
         <div class="mobile-header-actions">
+          <button id="mobileThemeBtn" class="mobile-icon-btn" title="Alternar tema" type="button">
+            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          </button>
           <button id="mobileNewDayBtn" class="mobile-icon-btn" title="Nova anotação" type="button">
             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
           </button>
@@ -245,6 +290,24 @@
       </div>
 
       <div id="editorPane" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+        <!-- CÁPSULA DO TEMPO (Recordações do Passado) -->
+        <div class="time-capsule-banner" id="timeCapsuleBanner" style="display:none;">
+          <div class="time-capsule-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+          </div>
+          <div class="time-capsule-body">
+            <div class="time-capsule-badge" id="timeCapsuleBadge">Cápsula do Tempo</div>
+            <div class="time-capsule-text" id="timeCapsuleText"></div>
+          </div>
+          <div class="time-capsule-actions">
+            <button class="time-capsule-btn" id="timeCapsuleViewBtn" type="button">Abrir anotação</button>
+            <button class="time-capsule-close" id="timeCapsuleCloseBtn" type="button" title="Dispensar">✕</button>
+          </div>
+        </div>
+
         <div id="editorHeader">
           <div class="editor-header-row1">
             <div class="editor-title-group">
@@ -294,7 +357,12 @@
           <button class="tool-btn" id="tb-italic"><i>I</i></button>
           <button class="tool-btn" id="tb-underline"><u>U</u></button>
           <button class="tool-btn" id="tb-strike"><s>S</s></button>
-          <button class="tool-btn" id="tb-mark">&#x1F58A;</button>
+          <button class="tool-btn" id="tb-mark" title="Destacar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+            </svg>
+          </button>
           <div class="tool-sep"></div>
           <button class="tool-btn" id="tb-h1">H1</button>
           <button class="tool-btn" id="tb-h2">H2</button>
@@ -302,19 +370,19 @@
           <div class="tool-sep"></div>
           <button class="tool-btn" id="tb-ul">&#x2022;</button>
           <button class="tool-btn" id="tb-ol">1.</button>
-          <button class="tool-btn" id="tb-quote">&#x275D;</button>
+          <button class="tool-btn" id="tb-quote" title="Citação">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M6 17h3l2-4V7H5v6h3zm8 0h3l2-4V7h-6v6h3z" />
+            </svg>
+          </button>
           <button class="tool-btn" id="tb-hr">&#x2014;</button>
           <div class="tool-sep"></div>
           <button class="tool-btn" id="tb-code">&lt;/&gt;</button>
-          <button class="tool-btn" id="tb-clear">&#x2715;</button>
-          <div class="tool-sep"></div>
-          <button class="tool-btn" id="tb-ai" style="color: var(--text-primary); font-weight: 700;"
-            title="Inteligência Artificial">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 2px;">
-              <path
-                d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-            </svg> IA
+          <button class="tool-btn" id="tb-clear" title="Limpar formatação">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
         </div>
         <div id="editorWrap">
@@ -390,21 +458,7 @@
         </svg> Configurações</h3>
       <p>Gerencie sua conta, tema e dados do seu Personal.</p>
 
-      <div class="setting-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-        <div class="setting-label"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-            stroke-width="2" style="vertical-align: sub;">
-            <path
-              d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-          </svg> Gemini API Key</div>
-        <div class="setting-desc" style="margin-bottom: 5px;">Necessário para usar os recursos de Inteligência
-          Artificial. <a href="https://aistudio.google.com/app/apikey" target="_blank"
-            style="color: var(--text-primary); text-decoration: underline;">Pegue a sua aqui</a>.</div>
-        <div style="display: flex; gap: 10px; width: 100%;">
-          <input type="password" id="geminiApiKeyInput" class="auth-input" placeholder="Cole sua chave aqui..."
-            style="flex: 1;">
-          <button class="btn-primary" id="saveApiKeyBtn">Salvar</button>
-        </div>
-      </div>
+
       <div class="setting-row">
         <div>
           <div class="setting-label"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -474,36 +528,6 @@
   </div>
 
 
-  <div class="overlay" id="ai-overlay">
-    <div class="modal" style="width: 380px;">
-      <h3><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-          stroke-linecap="round" stroke-linejoin="round" style="vertical-align: bottom;">
-          <path
-            d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-        </svg> Assistente IA</h3>
-      <p style="color: var(--text-secondary); margin-top: 4px; font-size: 13px;">Ações rápidas em 1 clique para potencializar sua anotação:</p>
-
-      <div class="modal-actions ai-actions-list" style="flex-direction: column; gap: 8px; margin-top: 16px;">
-        <button class="btn-ai-action" id="aiBtnSummarize">
-          <div class="ai-btn-title">📝 Gerar Resumo em Tópicos</div>
-          <div class="ai-btn-sub">Cria um resumo objetivo em exatamente 3 bullets</div>
-        </button>
-        <button class="btn-ai-action" id="aiBtnImprove">
-          <div class="ai-btn-title">✨ Corrigir e Melhorar Escrita</div>
-          <div class="ai-btn-sub">Ajusta gramática e pontuação preservando o sentido</div>
-        </button>
-        <button class="btn-ai-action" id="aiBtnExtractTodos">
-          <div class="ai-btn-title">☑️ Extrair Tarefas / To-Do</div>
-          <div class="ai-btn-sub">Detecta pendências e adiciona na lista de tarefas</div>
-        </button>
-        <button class="btn-ai-action" id="aiBtnTags">
-          <div class="ai-btn-title">🏷️ Sugerir Tags / Categorias</div>
-          <div class="ai-btn-sub">Lê o texto e gera 3 palavras-chave automáticas</div>
-        </button>
-        <button class="btn-cancel" id="aiBtnCancel" style="width: 100%; margin-top: 4px;">Cancelar</button>
-      </div>
-    </div>
-  </div>
 
   <!-- QUICK SEARCH MODAL (Ctrl+K / /) -->
   <div class="overlay" id="quicksearch-overlay">

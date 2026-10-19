@@ -92,6 +92,15 @@ function setSyncStatus(state) {
   }
 }
 
+function isContentEmpty(html) {
+  if (!html) return true;
+  if (/<(img|svg|table|audio|video|iframe|input|hr)\b/i.test(html)) return false;
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const text = (tmp.textContent || tmp.innerText || '').replace(/[\s\u200B-\u200D\uFEFF]/g, '');
+  return text.length === 0;
+}
+
 function mergeRemoteDay(key, remoteDoc, localData) {
   const localDoc = localData[key];
   if (!localDoc) {
@@ -99,17 +108,17 @@ function mergeRemoteDay(key, remoteDoc, localData) {
     return true;
   }
   
-  const remoteContent = (remoteDoc.content || '').trim();
-  const localContent = (localDoc.content || '').trim();
+  const remoteEmpty = isContentEmpty(remoteDoc.content) && (!remoteDoc.checklist || remoteDoc.checklist.length === 0) && (!remoteDoc.images || remoteDoc.images.length === 0);
+  const localEmpty = isContentEmpty(localDoc.content) && (!localDoc.checklist || localDoc.checklist.length === 0) && (!localDoc.images || localDoc.images.length === 0);
   
   // Rule 1: A placeholder/empty local note NEVER overwrites a cloud note with content
-  if (!localContent && remoteContent) {
+  if (localEmpty && !remoteEmpty) {
     localData[key] = { ...localDoc, ...remoteDoc };
     return true;
   }
   
   // Rule 2: If cloud note has no content while local note does, keep local note
-  if (localContent && !remoteContent) {
+  if (!localEmpty && remoteEmpty) {
     return false;
   }
   
@@ -117,9 +126,10 @@ function mergeRemoteDay(key, remoteDoc, localData) {
   const remoteTime = remoteDoc.updatedAt ? new Date(remoteDoc.updatedAt).getTime() : 0;
   const localTime = localDoc.updatedAt ? new Date(localDoc.updatedAt).getTime() : 0;
   
-  if (remoteTime > localTime || (!localTime && remoteTime)) {
+  if (remoteTime >= localTime || (!localTime && remoteTime)) {
     if (localDoc.content !== remoteDoc.content ||
         JSON.stringify(localDoc.tags || []) !== JSON.stringify(remoteDoc.tags || []) ||
+        JSON.stringify(localDoc.images || []) !== JSON.stringify(remoteDoc.images || []) ||
         JSON.stringify(localDoc.checklist || []) !== JSON.stringify(remoteDoc.checklist || [])) {
       localData[key] = { ...localDoc, ...remoteDoc };
       return true;
@@ -316,7 +326,14 @@ function toggleTheme() {
 }
 function updateThemeBtn() {
   const isL = document.documentElement.classList.contains('light');
-  $('themeToggleBtn').innerHTML = isL ? '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>' : '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+  const lightSvg = '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>';
+  const darkSvg = '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+  const iconHtml = isL ? lightSvg : darkSvg;
+
+  if ($('themeToggleBtn')) $('themeToggleBtn').innerHTML = iconHtml;
+  if ($('mobileThemeBtn')) $('mobileThemeBtn').innerHTML = iconHtml;
+  if ($('authThemeToggleBtn')) $('authThemeToggleBtn').innerHTML = iconHtml;
+
   const sb = $('settingsThemeBtn');
   if (sb) sb.textContent = isL ? 'Mudar para Escuro' : 'Mudar para Claro';
 }
@@ -381,227 +398,47 @@ function closeModal() { $('modal-overlay').classList.remove('show'); }
 $('modal-overlay').addEventListener('click', e => { if (e.target === $('modal-overlay')) closeModal(); });
 
 
-/* ══════════ AI GEMINI INTEGRATION ══════════ */
-let geminiApiKey = localStorage.getItem('geminiApiKey') || '';
-
-if ($('geminiApiKeyInput')) {
-  $('geminiApiKeyInput').value = geminiApiKey;
-  $('saveApiKeyBtn').addEventListener('click', () => {
-    geminiApiKey = $('geminiApiKeyInput').value.trim();
-    localStorage.setItem('geminiApiKey', geminiApiKey);
-    showToast('Chave API salva com sucesso!', false);
-  });
+/* ══════════ CÁPSULA DO TEMPO (Recordações do Passado) ══════════ */
+function getPastMonthKey(y, m, d, monthsAgo) {
+  const dt = new Date(y, m - 1 - monthsAgo, d);
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 
-if ($('tb-ai')) {
-  $('tb-ai').addEventListener('click', () => {
-    if (!geminiApiKey) {
-      // Pulse the settings button to hint where to configure
-      const sBtn = $('settingsBtn');
-      sBtn.style.outline = '2px solid rgba(231,111,81,0.8)';
-      sBtn.style.outlineOffset = '2px';
-      setTimeout(() => { sBtn.style.outline = ''; sBtn.style.outlineOffset = ''; }, 2000);
-      showToast('Configure sua Chave Gemini na Configurações (Engrenagem ali em cima).', true);
-      openSettings();
-      return;
-    }
-    $('ai-overlay').classList.add('show');
-  });
-}
+function checkTimeCapsule(key) {
+  const banner = $('timeCapsuleBanner');
+  if (!banner) return;
+  banner.style.display = 'none';
 
-if ($('aiBtnCancel')) {
-  $('aiBtnCancel').addEventListener('click', () => {
-    $('ai-overlay').classList.remove('show');
-  });
-  $('ai-overlay').addEventListener('click', (e) => {
-    if (e.target === $('ai-overlay')) $('ai-overlay').classList.remove('show');
-  });
-}
+  if (!key) return;
+  const local = loadLocal();
+  const [year, month, day] = key.split('-').map(Number);
+  if (!year || !month || !day) return;
 
-async function callGemini(prompt, systemInstruction = '') {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
-  const body = {
-    contents: [{ parts: [{ text: prompt }] }]
-  };
-  if (systemInstruction) {
-    body.systemInstruction = { parts: [{ text: systemInstruction }] };
-  }
+  const candidates = [
+    { label: 'Há 1 ano', key: `${year - 1}-${pad(month)}-${pad(day)}` },
+    { label: 'Há 2 anos', key: `${year - 2}-${pad(month)}-${pad(day)}` },
+    { label: 'Há 1 mês', key: getPastMonthKey(year, month, day, 1) },
+    { label: 'Há 6 meses', key: getPastMonthKey(year, month, day, 6) }
+  ];
 
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error?.message || 'Erro na API');
-
-    return data.candidates[0].content.parts[0].text;
-  } catch (error) {
-    console.error('Gemini Error:', error);
-    showToast('Erro na IA: ' + error.message, true);
-    return null;
-  }
-}
-
-function setAILoading(btnId, isLoading, originalText) {
-  const btn = $(btnId);
-  if (!btn) return;
-  if (isLoading) {
-    btn.disabled = true;
-    btn.dataset.origHtml = btn.innerHTML;
-    btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;"><div class="auth-spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;"></div> Processando...</span>';
-    $('editor').contentEditable = "false";
-  } else {
-    btn.disabled = false;
-    if (btn.dataset.origHtml) btn.innerHTML = btn.dataset.origHtml;
-    else if (originalText) btn.textContent = originalText;
-    $('editor').contentEditable = "true";
-    $('ai-overlay').classList.remove('show');
-  }
-}
-
-// AI Action 1: Gerar Resumo em Tópicos (3 bullets)
-if ($('aiBtnSummarize')) {
-  $('aiBtnSummarize').addEventListener('click', async () => {
-    const text = $('editor').innerText;
-    if (!text.trim()) return showToast('Anotação vazia.', true);
-
-    setAILoading('aiBtnSummarize', true);
-
-    try {
-      const prompt = `Resuma o texto da seguinte anotação em EXATAMENTE 3 tópicos (bullet points) objetivos, claros e diretos. Cada tópico DEVE começar com "• ". Não adicione títulos, saudações nem introduções. Texto:\n\n${text}`;
-      const result = await callGemini(prompt);
-      if (result) {
-        let htmlResult = '<br><div class="ai-summary-block"><strong>📌 Resumo em 3 Tópicos:</strong><br>';
-        htmlResult += result.trim().replace(/\n+/g, '<br>') + '</div><br>';
-        $('editor').innerHTML += htmlResult;
-        doSave();
-        updateWC();
-        showToast('Resumo em 3 tópicos gerado!', false);
-      }
-    } finally {
-      setAILoading('aiBtnSummarize', false);
-    }
-  });
-}
-
-// AI Action 2: Corrigir e Melhorar Escrita
-if ($('aiBtnImprove')) {
-  $('aiBtnImprove').addEventListener('click', async () => {
-    const sel = window.getSelection();
-    let text = sel.toString();
-    let isSelection = true;
-
-    if (!text.trim()) {
-      text = $('editor').innerText;
-      isSelection = false;
-    }
-
-    if (!text.trim()) {
-      showToast('Anotação vazia.', true);
-      return;
-    }
-
-    setAILoading('aiBtnImprove', true);
-
-    try {
-      const prompt = `Corrija e melhore a escrita do texto a seguir, ajustando com precisão a pontuação, acentuação e gramática. Mantenha fielmente o tom, o sentido e a intenção originais. Responda APENAS com o texto corrigido, sem explicações, saudações ou aspas:\n\n${text}`;
-      const result = await callGemini(prompt);
-      if (result) {
-        if (isSelection) {
-          document.execCommand('insertText', false, result);
-        } else {
-          $('editor').innerText = result;
+  for (const cand of candidates) {
+    const pastDoc = local[cand.key];
+    if (pastDoc && !isContentEmpty(pastDoc.content)) {
+      const plain = toPlain(pastDoc.content).slice(0, 110).trim();
+      if (plain) {
+        if ($('timeCapsuleBadge')) $('timeCapsuleBadge').textContent = `Cápsula do Tempo · ${cand.label}`;
+        if ($('timeCapsuleText')) $('timeCapsuleText').textContent = `Neste mesmo dia, você escreveu: "${plain}..."`;
+        banner.style.display = 'flex';
+        if ($('timeCapsuleViewBtn')) {
+          $('timeCapsuleViewBtn').onclick = () => openTab(cand.key);
         }
-        doSave();
-        updateWC();
-        showToast('Texto corrigido e aprimorado!', false);
-      }
-    } finally {
-      setAILoading('aiBtnImprove', false);
-    }
-  });
-}
-
-// AI Action 3: Extrair Tarefas / To-Do
-if ($('aiBtnExtractTodos')) {
-  $('aiBtnExtractTodos').addEventListener('click', async () => {
-    const text = $('editor').innerText;
-    if (!text.trim()) return showToast('Anotação vazia.', true);
-
-    setAILoading('aiBtnExtractTodos', true);
-
-    try {
-      const prompt = `Varra o texto a seguir procurando todas as pendências, tarefas e compromissos. Retorne cada tarefa em uma linha começando com "- [ ] ". Se houver horário no texto (ex: 14:00, às 10h), coloque no final da linha no formato "(HH:MM)". Responda APENAS com a lista de tarefas, sem saudações ou explicações:\n\n${text}`;
-      const result = await callGemini(prompt);
-      if (result) {
-        const lines = result.split('\n').map(l => l.trim()).filter(Boolean);
-        let count = 0;
-        lines.forEach(line => {
-          const clean = line.replace(/^[-\*\•\d\.\s\[\]]+/, '').trim();
-          if (clean) {
-            let taskTime = '';
-            const timeMatch = clean.match(/\(([0-2]?[0-9]:[0-5][0-9])\)/);
-            let finalDesc = clean;
-            if (timeMatch) {
-              taskTime = timeMatch[1];
-              finalDesc = clean.replace(timeMatch[0], '').trim();
-            }
-            currentChecklist.push({ text: finalDesc, time: taskTime, done: false, notified: false });
-            count++;
-          }
-        });
-
-        if (count > 0) {
-          saveCurrent();
-          if ($('tabChecklist')) renderChecklist();
-          showToast(`${count} tarefa(s) extraída(s) para a aba Tarefas!`, false);
-        } else {
-          showToast('Nenhuma pendência identificada no texto.', true);
+        if ($('timeCapsuleCloseBtn')) {
+          $('timeCapsuleCloseBtn').onclick = () => { banner.style.display = 'none'; };
         }
+        return;
       }
-    } finally {
-      setAILoading('aiBtnExtractTodos', false);
     }
-  });
-}
-
-// AI Action 4: Sugerir Tags / Categorias
-if ($('aiBtnTags')) {
-  $('aiBtnTags').addEventListener('click', async () => {
-    const text = $('editor').innerText;
-    if (!text.trim()) return showToast('Anotação vazia.', true);
-
-    setAILoading('aiBtnTags', true);
-
-    try {
-      const prompt = `Leia a anotação abaixo e sugira EXATAMENTE 3 palavras-chave (tags) concisas e relevantes em português para categorizá-la. Responda APENAS com as 3 palavras separadas por vírgula, todas em letras minúsculas, sem o caractere # e sem acentos ou caracteres especiais. Exemplo: trabalho, reuniao, financas.\n\n${text}`;
-      const result = await callGemini(prompt);
-      if (result) {
-        const newTags = result.split(',')
-          .map(t => t.trim().toLowerCase().replace(/[^a-z0-9_\-àáâãéêíóôõúç]/gi, ''))
-          .filter(t => t.length > 0)
-          .slice(0, 3);
-
-        let addedCount = 0;
-        newTags.forEach(t => {
-          if (!currentTags.includes(t)) {
-            currentTags.push(t);
-            addedCount++;
-          }
-        });
-
-        renderTagsInEditor();
-        renderTagFilterBar();
-        doSave();
-        showToast(`${addedCount || newTags.length} tag(s) vinculada(s) à nota!`, false);
-      }
-    } finally {
-      setAILoading('aiBtnTags', false);
-    }
-  });
+  }
 }
 
 /* ────── Settings ────── */
@@ -653,7 +490,7 @@ function setAuthMode(mode) {
   $('tabLogin').classList.toggle('active', mode === 'login');
   $('tabRegister').classList.toggle('active', mode === 'register');
   $('confirmField').style.display = mode === 'register' ? '' : 'none';
-  $('authBtnLabel').textContent = mode === 'login' ? 'Entrar' : 'Criar Conta';
+  $('authBtnLabel').textContent = mode === 'login' ? 'Entrar no PersonalMk' : 'Criar conta gratuita';
   $('authErr').textContent = '';
   $('authPassword').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
 }
@@ -693,19 +530,22 @@ async function doAuth() {
   } catch (e) {
     const msgs = {
       'auth/user-not-found': 'Email não encontrado.',
-      'auth/wrong-password': 'Senha tá errada, bobão.',
+      'auth/wrong-password': 'Senha incorreta. Tente novamente.',
       'auth/email-already-in-use': 'Email já cadastrado.',
       'auth/invalid-email': 'Email inválido.',
       'auth/too-many-requests': 'Muitas tentativas. Tente mais tarde.',
-      'auth/network-request-failed': 'Sem conexão seu pobre. Tente o modo offline.',
+      'auth/network-request-failed': 'Sem conexão de rede. Tente o modo offline.',
     };
     errEl.textContent = msgs[e.code] || 'Erro: ' + e.message;
     btn.disabled = false;
-    $('authBtnLabel').textContent = authMode === 'login' ? 'Entrar' : 'Criar Conta';
+    $('authBtnLabel').textContent = authMode === 'login' ? 'Entrar no PersonalMk' : 'Criar conta gratuita';
   }
 }
 
-$('authOfflineBtn').addEventListener('click', goOffline);
+$('authOfflineBtn')?.addEventListener('click', goOffline);
+$('authNavOfflineBtn')?.addEventListener('click', goOffline);
+$('authThemeToggleBtn')?.addEventListener('click', toggleTheme);
+$('mobileThemeBtn')?.addEventListener('click', toggleTheme);
 
 function goOffline() {
   currentUser = null;
@@ -1001,10 +841,19 @@ function renderSidebar(filter) {
     const k = item.key;
     const d = item.day;
     const c = d.content || '';
-    const tags = d.tags || [];
-    const preview = item.preview || toPlain(c).slice(0, 52).trim() || 'Sem conteúdo';
+    let preview = item.preview || toPlain(c).slice(0, 52).trim();
+    if (!preview) {
+      if (/<(img|svg)\b/i.test(c) || (d.images && d.images.length > 0)) {
+        preview = 'Imagem anexada';
+      } else if (d.checklist && d.checklist.length > 0) {
+        const doneCount = d.checklist.filter(x => x.done).length;
+        preview = `${doneCount}/${d.checklist.length} tarefas`;
+      } else {
+        preview = 'Sem conteúdo';
+      }
+    }
     const ac = k === activeTab ? ' active' : '';
-    const hc = c.trim().length ? ' has-content' : '';
+    const hc = (c.trim().length || (d.images && d.images.length) || (d.checklist && d.checklist.length)) ? ' has-content' : '';
 
     const chips = tags.slice(0, 2).map(t => {
       const col = getTagColors(t);
@@ -1432,7 +1281,8 @@ function showEditor(key) {
   $('editor').innerHTML = day.content || '';
   const title = fmtFull(key);
   $('currentDayTitle').textContent = title;
-  if ($('mobileHeaderTitle')) $('mobileHeaderTitle').textContent = title;
+  if ($('mobileHeaderTitle')) $('mobileHeaderTitle').textContent = 'PersonalMk';
+  checkTimeCapsule(key);
   const upd = day.updatedAt ? new Date(day.updatedAt).toLocaleString('pt-BR') : null;
   $('currentDaySubtitle').textContent = upd ? `Última edição: ${upd}` : 'Novo registro';
   currentTags = [...(day.tags || [])];
@@ -1673,7 +1523,7 @@ function exportNoteMarkdown(key) {
   a.download = `personalmk_${key}.md`;
   a.click();
   URL.revokeObjectURL(url);
-  toast('Anotação exportada em Markdown (.md)!', '📄');
+  toast('Anotação exportada em Markdown (.md)!', '');
 }
 
 function exportAllMarkdown() {
@@ -1725,7 +1575,7 @@ function exportAllMarkdown() {
   a.download = `personalmk_backup_todas_notas_${todayKey()}.md`;
   a.click();
   URL.revokeObjectURL(url);
-  toast(`${keys.length} anotações exportadas em Markdown (.md)!`, '📄');
+  toast(`${keys.length} anotações exportadas em Markdown (.md)!`, '');
 }
 
 /* ────── Export Note Button ────── */
@@ -2068,7 +1918,7 @@ window.addEventListener('paste', async (e) => {
     if (!day.images) day.images = [];
 
     for (let file of imageFiles) {
-      const dataUrl = await compressImage(file);
+      const dataUrl = await compressImage(file, 1200, 0.7);
       const imgId = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
       await idbSave(imgId, dataUrl);
       day.images.push(imgId);
@@ -2081,10 +1931,22 @@ window.addEventListener('paste', async (e) => {
       }
     }
 
-    await setDay(activeTab, day.content, day.tags, day.images);
+    await setDay(activeTab, day.content, day.tags, day.images, day.checklist);
     renderGallery();
     setSave('saved');
     toast('Imagem colada na galeria!', '');
+  } else if (imageFiles.length > 0 && ($('tabText').classList.contains('active') || document.activeElement === $('editor') || $('editor').contains(document.activeElement))) {
+    e.preventDefault();
+    setSave('saving');
+    for (let file of imageFiles) {
+      const dataUrl = await compressImage(file, 900, 0.65);
+      const imgHtml = `<p><img src="${dataUrl}" alt="Captura" style="max-width:100%;height:auto;border-radius:8px;margin:8px 0;display:block;" /></p><p><br></p>`;
+      document.execCommand('insertHTML', false, imgHtml);
+    }
+    doSave();
+    updateWC();
+    setSave('saved');
+    toast('Imagem colada e otimizada!', '');
   }
 });
 
@@ -2245,7 +2107,7 @@ $('notifBannerLater')?.addEventListener('click', () => {
 });
 $('settingsNotifBtn')?.addEventListener('click', requestNotifPermission);
 $('settingsNotifTestBtn')?.addEventListener('click', () => {
-  sendNotification('🔔 Teste do PersonalMk', 'Se você está vendo isso, as notificações estão funcionando!', { tag: 'pmk-test' });
+  sendNotification('Teste do PersonalMk', 'Se você está vendo isso, as notificações estão funcionando!', { tag: 'pmk-test' });
 });
 
 /* ────── Lembretes: 30 min antes + na hora ────── */
@@ -2275,14 +2137,14 @@ function checkReminders() {
     // `notified` é o campo antigo (versões anteriores) = aviso de 30 min já enviado
     if (!item.n30 && !item.notified && diff > 0 && diff <= 30) {
       item.n30 = true; item.notified = true; modified = true;
-      toast(`Em ${diff} min: "${item.text}" às ${item.time}`, '⏰');
-      sendNotification(`⏰ Em ${diff} min: ${item.text}`, `Seu compromisso começa às ${item.time}.`, { tag: tagBase + '-30' });
+      toast(`Em ${diff} min: "${item.text}" às ${item.time}`, '');
+      sendNotification(`Em ${diff} min: ${item.text}`, `Seu compromisso começa às ${item.time}.`, { tag: tagBase + '-30' });
     }
 
     if (!item.nNow && diff <= 0 && diff > -10) {
       item.nNow = true; item.n30 = true; item.notified = true; modified = true;
-      toast(`Chegou a hora: "${item.text}"`, '🔔');
-      sendNotification(`🔔 Chegou a hora: ${item.text}`, `Compromisso marcado para ${item.time}.`, { tag: tagBase + '-now' });
+      toast(`Chegou a hora: "${item.text}"`, '');
+      sendNotification(`Chegou a hora: ${item.text}`, `Compromisso marcado para ${item.time}.`, { tag: tagBase + '-now' });
     }
   });
 
@@ -2334,7 +2196,6 @@ function setSpotifyGenre(g) {
 const GENRE_PICKS = {
   'rock': {
     name: 'Rock & Pop Rock',
-    emoji: '🎸',
     picks: [
       ['Don\'t Stop Me Now', 'Queen'],
       ['Tempo Perdido', 'Legião Urbana'],
@@ -2350,7 +2211,6 @@ const GENRE_PICKS = {
   },
   'pop': {
     name: 'Pop & Hits',
-    emoji: '🎤',
     picks: [
       ['Blinding Lights', 'The Weeknd'],
       ['Levitating', 'Dua Lipa'],
@@ -2365,7 +2225,6 @@ const GENRE_PICKS = {
   },
   'trap': {
     name: 'Trap & Hip-Hop',
-    emoji: '⚡',
     picks: [
       ['Kenny G', 'Matuê'],
       ['HIGHEST IN THE ROOM', 'Travis Scott'],
@@ -2380,7 +2239,6 @@ const GENRE_PICKS = {
   },
   'mpb': {
     name: 'MPB & Clássicos BR',
-    emoji: '🇧🇷',
     picks: [
       ['Não Quero Dinheiro', 'Tim Maia'],
       ['País Tropical', 'Jorge Ben Jor'],
@@ -2395,7 +2253,6 @@ const GENRE_PICKS = {
   },
   'sertanejo': {
     name: 'Sertanejo',
-    emoji: '🤠',
     picks: [
       ['Sosseguei', 'Jorge & Mateus'],
       ['Até Você Voltar', 'Henrique & Juliano'],
@@ -2408,7 +2265,6 @@ const GENRE_PICKS = {
   },
   'lofi': {
     name: 'Lo-Fi & Relax',
-    emoji: '☕',
     picks: [
       ['Snowman', 'Lofi Girl'],
       ['[im closing my eyes]', 'potsu'],
@@ -2421,7 +2277,6 @@ const GENRE_PICKS = {
   },
   'eletronica': {
     name: 'Eletrônica',
-    emoji: '🎧',
     picks: [
       ['One More Time', 'Daft Punk'],
       ['Wake Me Up', 'Avicii'],
@@ -2434,7 +2289,6 @@ const GENRE_PICKS = {
   },
   'foco': {
     name: 'Foco & Instrumental',
-    emoji: '🎯',
     picks: [
       ['Time', 'Hans Zimmer'],
       ['Clair de Lune', 'Claude Debussy'],
@@ -2449,13 +2303,13 @@ const GENRE_PICKS = {
 
 // Sugestões por dia da semana (fallback padrão)
 const WEEKDAY_VIBES = [
-  { day: 'domingo', mood: 'pra desacelerar', emoji: '☀️', picks: [['Garota de Ipanema', 'Tom Jobim'], ['Here Comes the Sun', 'The Beatles'], ['Trem-Bala', 'Ana Vilela'], ['Sunday Morning', 'Maroon 5']] },
-  { day: 'segunda-feira', mood: 'pra começar a semana com energia', emoji: '⚡', picks: [['Eye of the Tiger', 'Survivor'], ["Don't Stop Me Now", 'Queen'], ['Lose Yourself', 'Eminem'], ['Tempo Perdido', 'Legião Urbana']] },
-  { day: 'terça-feira', mood: 'pra manter o foco', emoji: '🎯', picks: [['Weightless', 'Marconi Union'], ['Clair de Lune', 'Claude Debussy'], ['Time', 'Hans Zimmer'], ['Intro', 'The xx']] },
-  { day: 'quarta-feira', mood: 'pra atravessar o meio da semana', emoji: '🌤️', picks: [['Happy', 'Pharrell Williams'], ['Mr. Blue Sky', 'Electric Light Orchestra'], ['Vou Deixar', 'Skank'], ['Shake It Off', 'Taylor Swift']] },
-  { day: 'quinta-feira', mood: 'pra embalar a reta final', emoji: '🚀', picks: [['Blinding Lights', 'The Weeknd'], ['Levitating', 'Dua Lipa'], ['Anna Júlia', 'Los Hermanos'], ['Uptown Funk', 'Mark Ronson, Bruno Mars']] },
-  { day: 'sexta-feira', mood: 'porque sextou', emoji: '🎉', picks: [["Friday I'm in Love", 'The Cure'], ['País Tropical', 'Jorge Ben Jor'], ['September', 'Earth, Wind & Fire'], ['Dancing Queen', 'ABBA']] },
-  { day: 'sábado', mood: 'pra curtir o fim de semana', emoji: '🌴', picks: [['Three Little Birds', 'Bob Marley & The Wailers'], ['Lança Perfume', 'Rita Lee'], ['Wonderwall', 'Oasis'], ['Good Vibrations', 'The Beach Boys']] }
+  { day: 'domingo', mood: 'pra desacelerar', picks: [['Garota de Ipanema', 'Tom Jobim'], ['Here Comes the Sun', 'The Beatles'], ['Trem-Bala', 'Ana Vilela'], ['Sunday Morning', 'Maroon 5']] },
+  { day: 'segunda-feira', mood: 'pra começar a semana com energia', picks: [['Eye of the Tiger', 'Survivor'], ["Don't Stop Me Now", 'Queen'], ['Lose Yourself', 'Eminem'], ['Tempo Perdido', 'Legião Urbana']] },
+  { day: 'terça-feira', mood: 'pra manter o foco', picks: [['Weightless', 'Marconi Union'], ['Clair de Lune', 'Claude Debussy'], ['Time', 'Hans Zimmer'], ['Intro', 'The xx']] },
+  { day: 'quarta-feira', mood: 'pra atravessar o meio da semana', picks: [['Happy', 'Pharrell Williams'], ['Mr. Blue Sky', 'Electric Light Orchestra'], ['Vou Deixar', 'Skank'], ['Shake It Off', 'Taylor Swift']] },
+  { day: 'quinta-feira', mood: 'pra embalar a reta final', picks: [['Blinding Lights', 'The Weeknd'], ['Levitating', 'Dua Lipa'], ['Anna Júlia', 'Los Hermanos'], ['Uptown Funk', 'Mark Ronson, Bruno Mars']] },
+  { day: 'sexta-feira', mood: 'porque sextou', picks: [["Friday I'm in Love", 'The Cure'], ['País Tropical', 'Jorge Ben Jor'], ['September', 'Earth, Wind & Fire'], ['Dancing Queen', 'ABBA']] },
+  { day: 'sábado', mood: 'pra curtir o fim de semana', picks: [['Three Little Birds', 'Bob Marley & The Wailers'], ['Lança Perfume', 'Rita Lee'], ['Wonderwall', 'Oasis'], ['Good Vibrations', 'The Beach Boys']] }
 ];
 
 const spRedirectUri = () => location.origin + location.pathname;
@@ -2532,7 +2386,7 @@ async function spotifyHandleCallback() {
     localStorage.removeItem(SK_SP_VERIFIER);
     localStorage.removeItem(SK_SP_DAILY);
     localStorage.removeItem(SK_SP_SHOWN);
-    setTimeout(() => showToast('Spotify conectado com sucesso! 🎵'), 800);
+    setTimeout(() => showToast('Spotify conectado com sucesso!'), 800);
   } catch (e) {
     setTimeout(() => showToast('Erro ao conectar Spotify: ' + e.message, true), 800);
   }
@@ -2690,7 +2544,7 @@ async function openSpotifyModal(showSetupImmediately = false) {
   // Genre chips
   const genreChipsHtml = Object.entries(GENRE_PICKS).map(([k, g]) => {
     const act = currentGenre === k ? ' active' : '';
-    return `<button class="sp-genre-chip${act}" data-genre="${k}">${g.emoji} ${g.name}</button>`;
+    return `<button class="sp-genre-chip${act}" data-genre="${k}">${g.name}</button>`;
   }).join('');
 
   const connectionSection = connected
@@ -2715,7 +2569,7 @@ async function openSpotifyModal(showSetupImmediately = false) {
        </div>
 
        <div class="sp-setup-drawer" id="spSetupDrawer" style="display:${showSetupImmediately || !cid ? 'flex' : 'none'};">
-         <div class="sp-setup-head">🔑 Como conectar sua conta (1 Minuto):</div>
+         <div class="sp-setup-head">Como conectar sua conta (1 Minuto):</div>
          <p class="sp-setup-text">O Spotify exige um Client ID gratuito para autorizar no seu navegador com 100% de privacidade:</p>
          <ol class="sp-steps">
            <li>Acesse <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">developer.spotify.com/dashboard</a> e faça login.</li>
@@ -2736,7 +2590,7 @@ async function openSpotifyModal(showSetupImmediately = false) {
 
   $('spotifyModalBody').innerHTML = `
     <div class="sp-badge">${SPOTIFY_SVG} Música do dia</div>
-    <h3 class="sp-modal-title">${v.emoji} Hoje é ${v.day}</h3>
+    <h3 class="sp-modal-title">Hoje é ${v.day}</h3>
     <p class="sp-modal-sub">${pick.source === 'account' ? 'Escolhida entre o que você mais ouve' : 'Sua trilha sonora de hoje'}:</p>
     
     ${connectionSection}
@@ -2747,7 +2601,7 @@ async function openSpotifyModal(showSetupImmediately = false) {
 
     <div class="sp-divider">Ou personalize seu gosto musical sem login</div>
     <div class="sp-genres-box">
-      <div class="sp-genres-title">✨ Prefere escolher sem conectar a conta? Toque no seu estilo:</div>
+      <div class="sp-genres-title">Prefere escolher sem conectar a conta? Toque no seu estilo:</div>
       <div class="sp-genres-chips" id="spGenreChips">
         ${genreChipsHtml}
       </div>
@@ -2808,7 +2662,7 @@ document.addEventListener('click', async e => {
     e.preventDefault();
     const txt = $('spRedirectUriCode')?.textContent || spRedirectUri();
     navigator.clipboard.writeText(txt).then(() => {
-      showToast('URL copiada para a área de transferência! 📋');
+      showToast('URL copiada para a área de transferência!');
     });
     return;
   }
@@ -2830,7 +2684,7 @@ document.addEventListener('click', async e => {
     const genre = chip.dataset.genre;
     setSpotifyGenre(genre);
     localStorage.removeItem(SK_SP_DAILY);
-    showToast(`Estilo atualizado: ${GENRE_PICKS[genre]?.name || genre}! 🎵`);
+    showToast(`Estilo atualizado: ${GENRE_PICKS[genre]?.name || genre}!`);
     await renderSpotifyCard();
     openSpotifyModal();
     return;
@@ -2849,7 +2703,7 @@ async function runDailySpotify() {
   localStorage.setItem(SK_SP_SHOWN, today);
   if (document.hidden) {
     const pick = await getDailyPick();
-    sendNotification(`🎵 Música do dia · ${todayVibe().day}`, `${pick.name} · ${pick.artist}`, { url: pick.url, tag: 'pmk-spotify-' + today });
+    sendNotification(`Música do dia · ${todayVibe().day}`, `${pick.name} · ${pick.artist}`, { url: pick.url, tag: 'pmk-spotify-' + today });
   } else {
     setTimeout(openSpotifyModal, 1200);
   }
@@ -2865,7 +2719,7 @@ async function dailyTick() {
     if (localStorage.getItem(SK_SP_SHOWN) !== today) {
       localStorage.setItem(SK_SP_SHOWN, today);
       const pick = await getDailyPick();
-      sendNotification(`🎵 Bom dia! Hoje é ${todayVibe().day}`, `Sugestão de hoje: ${pick.name} · ${pick.artist}`, { url: pick.url, tag: 'pmk-spotify-' + today });
+      sendNotification(`Bom dia! Hoje é ${todayVibe().day}`, `Sugestão de hoje: ${pick.name} · ${pick.artist}`, { url: pick.url, tag: 'pmk-spotify-' + today });
     }
   }
 }
