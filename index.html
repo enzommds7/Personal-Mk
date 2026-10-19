@@ -156,11 +156,17 @@
 
       <div class="cal-wrap">
         <div class="cal-header">
-          <button class="cal-nav" id="calPrev">&#x2039;</button>
-          <span class="cal-month-label" id="calMonthLabel"></span>
-          <button class="cal-nav" id="calNext">&#x203A;</button>
+          <button class="cal-nav" id="calPrev" title="Anterior">&#x2039;</button>
+          <button class="cal-month-label" id="calMonthLabel" type="button" title="Mudar visualização (mês / ano)">
+            <span id="calMonthLabelText"></span>
+            <svg class="cal-view-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+          <button class="cal-nav" id="calNext" title="Próximo">&#x203A;</button>
         </div>
         <div class="cal-grid" id="calGrid"></div>
+        <div class="cal-footer" id="calTodayBtn" title="Ir para a anotação de hoje"></div>
       </div>
 
       <div class="section-label">Anotações</div>

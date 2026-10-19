@@ -1140,28 +1140,174 @@ if ($('quicksearch-overlay')) {
 
 
 let calYear = new Date().getFullYear(), calMonth = new Date().getMonth();
+let calView = 'days'; // 'days' | 'months' | 'years'
+let calDecadeStart = Math.floor(calYear / 12) * 12;
+
+const MONTH_NAMES_SHORT = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
 function renderCalendar() {
-  const notes = new Set(allKeys()); const today = todayKey();
-  const first = new Date(calYear, calMonth, 1).getDay();
-  const days = new Date(calYear, calMonth + 1, 0).getDate();
-  $('calMonthLabel').textContent = new Date(calYear, calMonth, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-  let html = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(d => `<div class="cal-dow">${d}</div>`).join('');
-  for (let i = 0; i < first; i++)html += `<div class="cal-day empty"></div>`;
-  for (let d = 1; d <= days; d++) {
-    const k = `${calYear}-${pad(calMonth + 1)}-${pad(d)}`;
-    let cls = 'cal-day';
-    if (k === today) cls += ' today';
-    if (notes.has(k)) cls += ' has-note';
-    if (k === activeTab) cls += ' active-day';
-    html += `<div class="${cls}" data-key="${k}">${d}</div>`;
+  const notes = new Set(allKeys());
+  const now = new Date();
+  const nowYear = now.getFullYear();
+  const nowMonth = now.getMonth();
+  const today = todayKey();
+
+  const labelEl = $('calMonthLabel');
+  const labelTextEl = $('calMonthLabelText');
+
+  if (labelEl) {
+    labelEl.classList.toggle('open-view', calView !== 'days');
   }
-  $('calGrid').innerHTML = html;
-  $('calGrid').querySelectorAll('.cal-day:not(.empty)').forEach(el => {
-    el.addEventListener('click', () => { createOrOpen(el.dataset.key); closeSidebar(); });
-  });
+
+  // Update Footer ("Hoje: DD/MM/AAAA")
+  const todayBtn = $('calTodayBtn');
+  if (todayBtn) {
+    todayBtn.textContent = `Hoje: ${now.toLocaleDateString('pt-BR')}`;
+  }
+
+  if (calView === 'days') {
+    // Label: "Outubro de 2026"
+    const rawMonth = new Date(calYear, calMonth, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+    const formattedTitle = rawMonth.charAt(0).toUpperCase() + rawMonth.slice(1);
+    if (labelTextEl) labelTextEl.textContent = formattedTitle;
+    else if (labelEl) labelEl.textContent = formattedTitle;
+
+    const first = new Date(calYear, calMonth, 1).getDay();
+    const days = new Date(calYear, calMonth + 1, 0).getDate();
+
+    let html = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'].map(d => `<div class="cal-dow">${d}</div>`).join('');
+    for (let i = 0; i < first; i++) html += `<div class="cal-day empty"></div>`;
+    for (let d = 1; d <= days; d++) {
+      const k = `${calYear}-${pad(calMonth + 1)}-${pad(d)}`;
+      let cls = 'cal-day';
+      if (k === today) cls += ' today';
+      if (notes.has(k)) cls += ' has-note';
+      if (k === activeTab) cls += ' active-day';
+      html += `<div class="${cls}" data-key="${k}">${d}</div>`;
+    }
+
+    $('calGrid').className = 'cal-grid cal-grid-days';
+    $('calGrid').innerHTML = html;
+    $('calGrid').querySelectorAll('.cal-day:not(.empty)').forEach(el => {
+      el.addEventListener('click', () => { createOrOpen(el.dataset.key); closeSidebar(); });
+    });
+
+  } else if (calView === 'months') {
+    // Label: "2026"
+    const formattedTitle = `${calYear}`;
+    if (labelTextEl) labelTextEl.textContent = formattedTitle;
+    else if (labelEl) labelEl.textContent = formattedTitle;
+
+    let html = '';
+    for (let m = 0; m < 12; m++) {
+      const isSelected = (m === calMonth);
+      const isCurrent = (calYear === nowYear && m === nowMonth);
+      const prefix = `${calYear}-${pad(m + 1)}`;
+      let hasNote = false;
+      for (const k of notes) {
+        if (k.startsWith(prefix)) { hasNote = true; break; }
+      }
+
+      let cls = 'cal-month-cell';
+      if (isSelected) cls += ' selected-month';
+      if (isCurrent) cls += ' current-month';
+      if (hasNote) cls += ' has-note';
+
+      html += `<div class="${cls}" data-month="${m}">${MONTH_NAMES_SHORT[m]}</div>`;
+    }
+
+    $('calGrid').className = 'cal-grid cal-grid-months';
+    $('calGrid').innerHTML = html;
+    $('calGrid').querySelectorAll('.cal-month-cell').forEach(el => {
+      el.addEventListener('click', () => {
+        calMonth = parseInt(el.dataset.month, 10);
+        calView = 'days';
+        renderCalendar();
+      });
+    });
+
+  } else if (calView === 'years') {
+    // Label: "2020 – 2031"
+    const endYear = calDecadeStart + 11;
+    const formattedTitle = `${calDecadeStart} – ${endYear}`;
+    if (labelTextEl) labelTextEl.textContent = formattedTitle;
+    else if (labelEl) labelEl.textContent = formattedTitle;
+
+    let html = '';
+    for (let y = calDecadeStart; y <= endYear; y++) {
+      const isSelected = (y === calYear);
+      const isCurrent = (y === nowYear);
+      const prefix = `${y}-`;
+      let hasNote = false;
+      for (const k of notes) {
+        if (k.startsWith(prefix)) { hasNote = true; break; }
+      }
+
+      let cls = 'cal-year-cell';
+      if (isSelected) cls += ' selected-year';
+      if (isCurrent) cls += ' current-year';
+      if (hasNote) cls += ' has-note';
+
+      html += `<div class="${cls}" data-year="${y}">${y}</div>`;
+    }
+
+    $('calGrid').className = 'cal-grid cal-grid-years';
+    $('calGrid').innerHTML = html;
+    $('calGrid').querySelectorAll('.cal-year-cell').forEach(el => {
+      el.addEventListener('click', () => {
+        calYear = parseInt(el.dataset.year, 10);
+        calView = 'months';
+        renderCalendar();
+      });
+    });
+  }
 }
-$('calPrev').addEventListener('click', () => { calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } renderCalendar(); });
-$('calNext').addEventListener('click', () => { calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } renderCalendar(); });
+
+$('calPrev').addEventListener('click', () => {
+  if (calView === 'days') {
+    calMonth--;
+    if (calMonth < 0) { calMonth = 11; calYear--; }
+  } else if (calView === 'months') {
+    calYear--;
+  } else if (calView === 'years') {
+    calDecadeStart -= 12;
+  }
+  renderCalendar();
+});
+
+$('calNext').addEventListener('click', () => {
+  if (calView === 'days') {
+    calMonth++;
+    if (calMonth > 11) { calMonth = 0; calYear++; }
+  } else if (calView === 'months') {
+    calYear++;
+  } else if (calView === 'years') {
+    calDecadeStart += 12;
+  }
+  renderCalendar();
+});
+
+$('calMonthLabel')?.addEventListener('click', () => {
+  if (calView === 'days') {
+    calView = 'months';
+  } else if (calView === 'months') {
+    calDecadeStart = Math.floor(calYear / 12) * 12;
+    calView = 'years';
+  } else {
+    calView = 'days';
+  }
+  renderCalendar();
+});
+
+$('calTodayBtn')?.addEventListener('click', () => {
+  const now = new Date();
+  calYear = now.getFullYear();
+  calMonth = now.getMonth();
+  calView = 'days';
+  renderCalendar();
+  createOrOpen(todayKey());
+  if (window.innerWidth <= 768) closeSidebar();
+});
 
 function openSidebar() {
   $('sidebar').classList.add('open');
@@ -1256,7 +1402,12 @@ function openTab(key) {
   activateTab(key);
 }
 function activateTab(key) {
-  activeTab = key; renderTabs(); renderSidebar($('searchInput').value); renderCalendar(); showEditor(key);
+  activeTab = key;
+  const d = keyToDate(key);
+  calYear = d.getFullYear();
+  calMonth = d.getMonth();
+  calView = 'days';
+  renderTabs(); renderSidebar($('searchInput').value); renderCalendar(); showEditor(key);
 }
 function closeTab(key) {
   openTabs = openTabs.filter(k => k !== key);
