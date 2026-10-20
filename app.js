@@ -855,7 +855,8 @@ function renderSidebar(filter) {
     const ac = k === activeTab ? ' active' : '';
     const hc = (c.trim().length || (d.images && d.images.length) || (d.checklist && d.checklist.length)) ? ' has-content' : '';
 
-    const chips = tags.slice(0, 2).map(t => {
+    const dayTags = Array.isArray(d.tags) ? d.tags : [];
+    const chips = dayTags.slice(0, 2).map(t => {
       const col = getTagColors(t);
       return `<span class="day-tag-chip" data-tag="${esc(t)}" style="background:${col.bg}; color:${col.text}; border-color:${col.border};">#${esc(t)}</span>`;
     }).join('');
@@ -1161,18 +1162,23 @@ $('calTodayBtn')?.addEventListener('click', () => {
 function openSidebar() {
   $('sidebar').classList.add('open');
   $('sidebarBackdrop').classList.add('show');
+  if (window.innerWidth <= 768 && location.hash !== '#menu') {
+    try { history.pushState({ sidebar: true }, '', '#menu'); } catch (_) {}
+  }
 }
 function closeSidebar() {
   $('sidebar').classList.remove('open');
   $('sidebarBackdrop').classList.remove('show');
-  if (window.innerWidth <= 768 && location.hash !== '#editor') {
-    history.pushState({ editor: true }, '', '#editor');
+  if (window.innerWidth <= 768 && location.hash === '#menu') {
+    try { history.back(); } catch (_) {}
   }
 }
-window.addEventListener('popstate', (e) => {
+window.addEventListener('popstate', () => {
   if (window.innerWidth <= 768) {
-    if (location.hash !== '#editor') openSidebar();
-    else closeSidebar();
+    if (location.hash !== '#menu' && $('sidebar').classList.contains('open')) {
+      $('sidebar').classList.remove('open');
+      $('sidebarBackdrop').classList.remove('show');
+    }
   }
 });
 function toggleMobileSidebar() {
@@ -1223,16 +1229,9 @@ $('newDayBtn').addEventListener('click', () => { if (window.innerWidth <= 768) c
 /* ────── Tabs ────── */
 let openTabs = [], activeTab = null;
 function renderTabs() {
-  const ham = $('hamburgerBtn').cloneNode(true);
-  $('tabsBar').innerHTML = '';
-  $('tabsBar').appendChild(ham);
-  ham.addEventListener('click', () => {
-    if (window.innerWidth <= 768) {
-      $('sidebar').classList.contains('open') ? closeSidebar() : openSidebar();
-    } else {
-      $('sidebar').classList.remove('collapsed');
-    }
-  });
+  const bar = $('tabsBar');
+  if (!bar) return;
+  bar.querySelectorAll('.tab').forEach(t => t.remove());
   openTabs.forEach(k => {
     const ac = k === activeTab ? ' active' : '';
     const tab = document.createElement('div');
@@ -1240,7 +1239,7 @@ function renderTabs() {
     tab.innerHTML = `<span>${esc(fmtTab(k))}</span><span class="tab-close" data-close="${k}">&#x00D7;</span>`;
     tab.addEventListener('click', e => { if (e.target.closest('.tab-close')) return; activateTab(k); });
     tab.querySelector('.tab-close').addEventListener('click', e => { e.stopPropagation(); closeTab(k); });
-    $('tabsBar').appendChild(tab);
+    bar.appendChild(tab);
   });
 }
 
@@ -1726,14 +1725,21 @@ const DB_VERSION = 1;
 const STORE_NAME = 'images';
 let idbDB = null;
 function initIDB() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = e => {
-      idbDB = e.target.result;
-      if (!idbDB.objectStoreNames.contains(STORE_NAME)) idbDB.createObjectStore(STORE_NAME);
-    };
-    req.onsuccess = e => { idbDB = e.target.result; resolve(); };
-    req.onerror = e => reject(e);
+  return new Promise((resolve) => {
+    try {
+      if (typeof indexedDB === 'undefined' || !indexedDB) return resolve();
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = e => {
+        try {
+          idbDB = e.target.result;
+          if (!idbDB.objectStoreNames.contains(STORE_NAME)) idbDB.createObjectStore(STORE_NAME);
+        } catch (_) {}
+      };
+      req.onsuccess = e => { idbDB = e.target.result; resolve(); };
+      req.onerror = () => resolve();
+    } catch (e) {
+      resolve();
+    }
   });
 }
 function idbSave(key, dataUrl) {
@@ -2748,10 +2754,17 @@ function initDailyExtras() {
 /* ────── App init (after auth) ────── */
 async function initApp() {
   updateUserBar();
-  // If cloud user, start realtime sync and fetch data
+  // If cloud user, start realtime sync and fetch data with safety timeout
   if (currentUser && FB_ON) {
-    startRealtimeSync();
-    await checkAndSyncCloud();
+    try {
+      startRealtimeSync();
+      await Promise.race([
+        checkAndSyncCloud(),
+        new Promise(res => setTimeout(res, 3500))
+      ]);
+    } catch (e) {
+      console.warn('Cloud sync timeout/warning on init:', e);
+    }
   }
   refreshAll();
   const today = todayKey(); const data = loadLocal();
@@ -2776,11 +2789,20 @@ async function initApp() {
 /* ────── BOOT ────── */
 (async function boot() {
   loadTheme();
-  await spotifyHandleCallback();
-  await initIDB();
-  $('app').style.display = 'none';
+  try { await spotifyHandleCallback(); } catch (e) { console.warn('Spotify callback warning:', e); }
+  try { await initIDB(); } catch (e) { console.warn('IDB init warning:', e); }
 
-  if (FB_ON) {
+  const mode = localStorage.getItem(SK_MODE);
+
+  if (mode === 'offline' || !FB_ON) {
+    hideAuthScreen();
+    setSyncStatus('offline');
+    updateUserBar();
+    await initApp();
+  } else {
+    // Show auth screen immediately so all buttons and tabs are interactive right away
+    showAuthScreen();
+
     // Firebase auth listener
     auth.onAuthStateChanged(async user => {
       currentUser = user || null;
@@ -2793,12 +2815,12 @@ async function initApp() {
             localStorage.setItem('userAvatarBase64', doc.data().avatar);
             updateUserBar();
           }
-        });
+        }).catch(err => console.warn('Avatar error:', err));
         await initApp();
 
       } else {
-        const mode = localStorage.getItem(SK_MODE);
-        if (mode === 'offline') {
+        const currentMode = localStorage.getItem(SK_MODE);
+        if (currentMode === 'offline') {
           hideAuthScreen();
           await initApp();
         } else {
@@ -2806,9 +2828,5 @@ async function initApp() {
         }
       }
     });
-  } else {
-    $('app').style.display = 'flex';
-    setSyncStatus('offline');
-    await initApp();
   }
 })();

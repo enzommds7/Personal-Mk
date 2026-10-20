@@ -79,13 +79,14 @@ body {
 #authScreen {
   position: fixed;
   inset: 0;
-  z-index: 998;
+  z-index: 2000;
   display: flex;
   flex-direction: column;
   background: var(--bg-deep);
   color: var(--text-primary);
   overflow-y: auto;
   overflow-x: hidden;
+  pointer-events: auto;
   transition: background var(--transition), color var(--transition);
 }
 
@@ -93,10 +94,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 28px;
+  padding: 16px 24px;
   width: 100%;
   max-width: 1120px;
   margin: 0 auto;
+  box-sizing: border-box;
   flex-shrink: 0;
 }
 
@@ -174,25 +176,28 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 30px 20px 50px;
+  padding: 24px 16px 40px;
   max-width: 860px;
   width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
 }
 
 .auth-hero {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 24px;
   max-width: 680px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .auth-hero-title {
-  font-size: 42px;
+  font-size: clamp(24px, 6.5vw, 42px);
   font-weight: 800;
   line-height: 1.2;
   letter-spacing: -1.2px;
   color: var(--text-primary);
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .auth-hero-pill {
@@ -223,20 +228,22 @@ body {
 }
 
 .auth-hero-sub {
-  font-size: 15.5px;
+  font-size: clamp(13.5px, 3.8vw, 15.5px);
   line-height: 1.55;
   color: var(--text-secondary);
   max-width: 540px;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 .auth-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 28px 26px;
+  padding: 24px 22px;
   width: 380px;
   max-width: 100%;
+  box-sizing: border-box;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.14);
 }
 
@@ -536,12 +543,18 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
-  z-index: 48;
-  backdrop-filter: blur(2px);
+  z-index: 1010;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.22s ease;
 }
 
 #sidebarBackdrop.show {
   display: block;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* ══════════ SIDEBAR ══════════ */
@@ -1904,7 +1917,8 @@ body {
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(4px);
-  z-index: 100;
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1100;
   align-items: center;
   justify-content: center;
 }
@@ -2162,17 +2176,19 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     align-items: center;
     justify-content: space-between;
     padding-top: max(12px, var(--sat));
-    padding-left: max(18px, var(--sal));
-    padding-right: max(18px, var(--sar));
+    padding-left: max(16px, var(--sal));
+    padding-right: max(16px, var(--sar));
     padding-bottom: 11px;
     background: var(--bg-surface-glass);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
-    z-index: 100;
+    z-index: 1000;
     box-sizing: border-box;
     width: 100%;
+    position: relative;
+    pointer-events: auto;
   }
 
   .mobile-header-center {
@@ -2220,6 +2236,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     font-family: inherit;
     -webkit-tap-highlight-color: transparent;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
   }
 
   .mobile-menu-btn:active {
@@ -2258,6 +2277,9 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
     transition: transform 0.15s, background 0.15s;
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
   }
 
   .mobile-icon-btn:active {
@@ -2290,7 +2312,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   }
 
   #sidebarBackdrop {
-    z-index: 998;
+    z-index: 1010;
   }
 
   #sidebar {
@@ -2303,7 +2325,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     max-width: 86vw;
     width: 310px;
     min-width: 0;
-    z-index: 999;
+    z-index: 1020;
     padding-top: max(14px, var(--sat));
     padding-bottom: max(18px, var(--sab));
     transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);

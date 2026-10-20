@@ -18,9 +18,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <script>
+    (function() {
+      try {
+        var theme = localStorage.getItem('agenda_v3_theme');
+        if (theme === 'light' || !theme) document.documentElement.classList.add('light');
+        else document.documentElement.classList.remove('light');
+      } catch(e) {}
+    })();
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(err => console.log('SW Reg failed:', err));
+        navigator.serviceWorker.register('sw.js').then(reg => {
+          reg.update();
+        }).catch(err => console.log('SW Reg failed:', err));
       });
     }
   </script>
