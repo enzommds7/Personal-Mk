@@ -490,10 +490,53 @@ function setAuthMode(mode) {
   $('tabLogin').classList.toggle('active', mode === 'login');
   $('tabRegister').classList.toggle('active', mode === 'register');
   $('confirmField').style.display = mode === 'register' ? '' : 'none';
+  if ($('authForgotBtn')) {
+    $('authForgotBtn').style.display = mode === 'login' ? '' : 'none';
+  }
   $('authBtnLabel').textContent = mode === 'login' ? 'Entrar no PersonalMk' : 'Criar conta gratuita';
   $('authErr').textContent = '';
   $('authPassword').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
 }
+
+$('authForgotBtn')?.addEventListener('click', async () => {
+  const email = $('authEmail').value.trim();
+  const errEl = $('authErr');
+  if (!email) {
+    errEl.textContent = 'Digite seu email no campo acima para redefinir sua senha.';
+    $('authEmail').focus();
+    return;
+  }
+  if (!auth) {
+    errEl.textContent = 'Serviço de autenticação offline ou indisponível.';
+    return;
+  }
+  const btn = $('authForgotBtn');
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = 'Enviando link...';
+  errEl.textContent = '';
+  try {
+    await auth.sendPasswordResetEmail(email);
+    openModal({
+      title: 'Email de recuperação enviado',
+      body: `Enviamos as instruções para redefinir a senha para <b>${esc(email)}</b>.<br><br>Verifique sua caixa de entrada e spam para cadastrar sua nova senha.`,
+      actions: [
+        { label: 'Entendi', cls: 'btn-primary' }
+      ]
+    });
+  } catch (e) {
+    const msgs = {
+      'auth/user-not-found': 'Nenhuma conta encontrada com este email.',
+      'auth/invalid-email': 'Formato de email inválido.',
+      'auth/too-many-requests': 'Muitas solicitações seguidas. Aguarde alguns instantes.',
+      'auth/network-request-failed': 'Sem conexão de rede. Verifique sua internet.'
+    };
+    errEl.textContent = msgs[e.code] || ('Erro ao redefinir: ' + (e.message || e.code));
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+});
 
 $('passToggle').addEventListener('click', () => {
   const inp = $('authPassword');
@@ -521,16 +564,28 @@ async function doAuth() {
   errEl.textContent = '';
 
   try {
+    let cred;
     if (authMode === 'login') {
-      await auth.signInWithEmailAndPassword(email, pass);
+      cred = await auth.signInWithEmailAndPassword(email, pass);
     } else {
-      await auth.createUserWithEmailAndPassword(email, pass);
+      cred = await auth.createUserWithEmailAndPassword(email, pass);
     }
-    // auth.onAuthStateChanged will handle the rest
+    if (cred && cred.user) {
+      currentUser = cred.user;
+      localStorage.setItem(SK_MODE, 'online');
+      btn.disabled = false;
+      $('authBtnLabel').textContent = authMode === 'login' ? 'Entrar no PersonalMk' : 'Criar conta gratuita';
+      hideAuthScreen();
+      setSyncStatus('online');
+      updateUserBar();
+      await initApp();
+      showToast(authMode === 'login' ? 'Login realizado com sucesso!' : 'Conta criada com sucesso!');
+    }
   } catch (e) {
     const msgs = {
       'auth/user-not-found': 'Email não encontrado.',
       'auth/wrong-password': 'Senha incorreta. Tente novamente.',
+      'auth/invalid-credential': 'Email ou senha incorretos.',
       'auth/email-already-in-use': 'Email já cadastrado.',
       'auth/invalid-email': 'Email inválido.',
       'auth/too-many-requests': 'Muitas tentativas. Tente mais tarde.',
@@ -832,6 +887,11 @@ function renderTagFilterBar() {
 
 function renderSidebar(filter) {
   const results = fuzzySearchNotes(filter, activeTagFilter);
+  const countBadge = $('notesCountBadge');
+  if (countBadge) {
+    countBadge.textContent = results.length > 0 ? results.length : '0';
+    countBadge.title = `${results.length} anotação(ões)`;
+  }
   if (!results.length) {
     $('daysList').innerHTML = `<div class="empty-msg">${filter || activeTagFilter ? 'Nenhum resultado encontrado.' : 'Nenhuma anotação ainda.<br>Clique em <b>Nova Anotação</b>.'}</div>`;
     return;
@@ -861,11 +921,19 @@ function renderSidebar(filter) {
       return `<span class="day-tag-chip" data-tag="${esc(t)}" style="background:${col.bg}; color:${col.text}; border-color:${col.border};">#${esc(t)}</span>`;
     }).join('');
 
+    let metaIcon = '';
+    if (d.checklist && d.checklist.length > 0) {
+      const doneCount = d.checklist.filter(x => x.done).length;
+      metaIcon = `<svg class="meta-icon" width="10.5" height="10.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="${doneCount}/${d.checklist.length} tarefas"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`;
+    } else if (/<(img|svg)\b/i.test(c) || (d.images && d.images.length > 0)) {
+      metaIcon = `<svg class="meta-icon" width="10.5" height="10.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" title="Imagem anexada"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+    }
+
     return `<div class="day-item${ac}${hc}" data-key="${k}" tabindex="0">
       <div class="day-dot"></div>
       <div class="day-item-info">
         <div class="day-item-date">${esc(fmtShort(k))}</div>
-        <div class="day-item-meta">${chips}<span class="day-item-preview">${esc(preview)}</span></div>
+        <div class="day-item-meta">${chips}${metaIcon}<span class="day-item-preview">${esc(preview)}</span></div>
       </div>
       <button class="day-item-del" data-del="${k}" title="Excluir anotação">&#x00D7;</button>
     </div>`;
@@ -891,9 +959,81 @@ function renderSidebar(filter) {
   });
 }
 
-/* ────── Quick Search Modal (Ctrl+K / /) ────── */
+/* ────── Quick Search / Command Palette (Ctrl+K / /) ────── */
 let quickSearchSelectedIdx = 0;
 let quickSearchResultsList = [];
+let quickSearchNavItems = [];
+
+const QUICK_COMMANDS = [
+  {
+    id: 'cmd-new',
+    title: 'Nova Anotação',
+    desc: 'Criar ou abrir anotação para qualquer data',
+    shortcut: 'Alt+N',
+    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>',
+    keywords: 'nova anotacao criar page data novo adicionar',
+    run: () => { pickDateModal(); }
+  },
+  {
+    id: 'cmd-today',
+    title: 'Ir para Anotação de Hoje',
+    desc: 'Abrir a página do dia atual',
+    shortcut: 'Hoje',
+    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    keywords: 'hoje today agora data diario',
+    run: () => { openTab(todayKey()); }
+  },
+  {
+    id: 'cmd-theme',
+    title: 'Alternar Tema Claro / Escuro',
+    desc: 'Alternar entre tema dark minimalista e light',
+    shortcut: 'Tema',
+    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>',
+    keywords: 'tema dark light escuro claro modo aparencia',
+    run: () => { toggleTheme(); }
+  },
+  {
+    id: 'cmd-spotify',
+    title: 'Música do Dia (Spotify)',
+    desc: 'Abrir player ou ver a trilha musical de hoje',
+    shortcut: 'Música',
+    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>',
+    keywords: 'spotify musica player som faixa track som trilha',
+    run: () => { openSpotifyModal(); }
+  },
+  {
+    id: 'cmd-backup',
+    title: 'Fazer Backup (Exportar JSON)',
+    desc: 'Download de segurança com todas as suas anotações',
+    shortcut: 'Backup',
+    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+    keywords: 'backup exportar json dados salvar download copia seguranca',
+    run: () => { doBackup(); }
+  },
+  {
+    id: 'cmd-settings',
+    title: 'Configurações',
+    desc: 'Conta, atalhos, IA e preferências do sistema',
+    shortcut: 'Ajustes',
+    icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+    keywords: 'configuracoes settings ajustes conta perfil atalhos ia sincronizacao',
+    run: () => { openSettings(); }
+  }
+];
+
+function highlightQuery(text, query) {
+  if (!query || !text) return esc(text);
+  const q = normalizeStr(query.trim());
+  if (!q) return esc(text);
+  const raw = String(text);
+  const norm = normalizeStr(raw);
+  const idx = norm.indexOf(q);
+  if (idx === -1) return esc(raw);
+  const before = raw.slice(0, idx);
+  const match = raw.slice(idx, idx + q.length);
+  const after = raw.slice(idx + q.length);
+  return `${esc(before)}<mark class="quicksearch-highlight">${esc(match)}</mark>${esc(after)}`;
+}
 
 function openQuickSearch() {
   const overlay = $('quicksearch-overlay');
@@ -915,36 +1055,149 @@ function renderQuickSearchResults(query) {
   const container = $('quickSearchResults');
   if (!container) return;
 
-  quickSearchResultsList = fuzzySearchNotes(query, null);
-  if (!quickSearchResultsList.length) {
-    container.innerHTML = `<div class="quicksearch-empty">Nenhuma anotação encontrada para "<b>${esc(query)}</b>"</div>`;
+  const rawQ = (query || '').trim();
+  const cleanQ = rawQ.startsWith('#') ? rawQ.slice(1) : rawQ;
+  quickSearchNavItems = [];
+
+  // 1. Notas encontradas via fuzzy search
+  const noteResults = fuzzySearchNotes(rawQ, null);
+  quickSearchResultsList = noteResults;
+
+  // 2. Comandos correspondentes
+  let matchedCmds = [];
+  if (!rawQ) {
+    matchedCmds = QUICK_COMMANDS.slice(0, 4);
+  } else {
+    matchedCmds = QUICK_COMMANDS.filter(cmd => {
+      return fuzzyMatch(cmd.title, cleanQ) || fuzzyMatch(cmd.keywords, cleanQ);
+    });
+  }
+
+  // 3. Tags correspondentes
+  const allTagsMap = {};
+  Object.values(loadLocal()).forEach(d => {
+    (d.tags || []).forEach(t => {
+      allTagsMap[t] = (allTagsMap[t] || 0) + 1;
+    });
+  });
+  let matchedTags = [];
+  if (cleanQ) {
+    matchedTags = Object.keys(allTagsMap)
+      .filter(t => fuzzyMatch(t, cleanQ))
+      .map(t => ({ tag: t, count: allTagsMap[t] }));
+  }
+
+  if (!noteResults.length && !matchedCmds.length && !matchedTags.length) {
+    container.innerHTML = `<div class="quicksearch-empty">Nenhum resultado encontrado para "<b>${esc(rawQ)}</b>"</div>`;
     return;
   }
 
-  if (quickSearchSelectedIdx >= quickSearchResultsList.length) {
-    quickSearchSelectedIdx = 0;
+  let html = '';
+  let globalIdx = 0;
+
+  // Bloco: Tags Encontradas
+  if (matchedTags.length) {
+    html += `<div class="quicksearch-group-title">Tags</div>`;
+    matchedTags.slice(0, 4).forEach(item => {
+      const idx = globalIdx++;
+      const isAct = idx === quickSearchSelectedIdx ? ' active' : '';
+      const c = getTagColors(item.tag);
+      quickSearchNavItems.push({
+        type: 'tag',
+        tag: item.tag,
+        run: () => {
+          activeTagFilter = item.tag;
+          renderTagFilterBar();
+          renderSidebar('');
+          closeQuickSearch();
+        }
+      });
+      html += `<div class="quicksearch-item quicksearch-tag-item${isAct}" data-idx="${idx}">
+        <div class="quicksearch-tag-left">
+          <span class="day-tag-chip" style="background:${c.bg}; color:${c.text}; border-color:${c.border};">#${highlightQuery(item.tag, cleanQ)}</span>
+        </div>
+        <span class="quicksearch-tag-count">${item.count} anotação(ões)</span>
+      </div>`;
+    });
   }
 
-  container.innerHTML = quickSearchResultsList.slice(0, 15).map((item, idx) => {
-    const isAct = idx === quickSearchSelectedIdx ? ' active' : '';
-    const tags = (item.day.tags || []).slice(0, 3).map(t => {
-      const c = getTagColors(t);
-      return `<span class="day-tag-chip" style="background:${c.bg}; color:${c.text}; border-color:${c.border}; font-size:10px;">#${esc(t)}</span>`;
-    }).join('');
+  // Bloco: Anotações
+  if (noteResults.length) {
+    const groupLabel = rawQ ? 'Anotações Encontradas' : 'Anotações Recentes';
+    html += `<div class="quicksearch-group-title">${groupLabel}</div>`;
+    const sliceCount = rawQ ? 8 : 5;
+    noteResults.slice(0, sliceCount).forEach(item => {
+      const idx = globalIdx++;
+      const isAct = idx === quickSearchSelectedIdx ? ' active' : '';
+      quickSearchNavItems.push({
+        type: 'note',
+        key: item.key,
+        run: () => {
+          openTab(item.key);
+          closeQuickSearch();
+        }
+      });
 
-    return `<div class="quicksearch-item${isAct}" data-idx="${idx}" data-key="${item.key}">
-      <div class="quicksearch-item-top">
-        <div class="quicksearch-item-date">${esc(fmtFull(item.key))}</div>
-        <div class="quicksearch-item-tags">${tags}</div>
-      </div>
-      <div class="quicksearch-item-preview">${esc(item.preview)}</div>
-    </div>`;
-  }).join('');
+      const tags = (item.day.tags || []).slice(0, 3).map(t => {
+        const c = getTagColors(t);
+        return `<span class="day-tag-chip" style="background:${c.bg}; color:${c.text}; border-color:${c.border}; font-size:10px;">#${esc(t)}</span>`;
+      }).join('');
+
+      html += `<div class="quicksearch-item quicksearch-note-item${isAct}" data-idx="${idx}" data-key="${item.key}">
+        <div class="quicksearch-item-top">
+          <div class="quicksearch-item-date">
+            <svg class="quicksearch-item-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>${highlightQuery(fmtFull(item.key), cleanQ)}</span>
+          </div>
+          <div class="quicksearch-item-tags">${tags}</div>
+        </div>
+        <div class="quicksearch-item-preview">${highlightQuery(item.preview, cleanQ)}</div>
+      </div>`;
+    });
+  }
+
+  // Bloco: Ações Rápidas / Comandos
+  if (matchedCmds.length) {
+    html += `<div class="quicksearch-group-title">Ações Rápidas</div>`;
+    matchedCmds.forEach(cmd => {
+      const idx = globalIdx++;
+      const isAct = idx === quickSearchSelectedIdx ? ' active' : '';
+      quickSearchNavItems.push({
+        type: 'command',
+        run: () => {
+          closeQuickSearch();
+          cmd.run();
+        }
+      });
+      html += `<div class="quicksearch-item quicksearch-cmd-item${isAct}" data-idx="${idx}">
+        <div class="quicksearch-cmd-left">
+          <div class="quicksearch-cmd-icon">${cmd.icon}</div>
+          <div class="quicksearch-cmd-info">
+            <div class="quicksearch-cmd-title">${highlightQuery(cmd.title, cleanQ)}</div>
+            <div class="quicksearch-cmd-desc">${esc(cmd.desc)}</div>
+          </div>
+        </div>
+        <kbd class="quicksearch-cmd-shortcut">${esc(cmd.shortcut)}</kbd>
+      </div>`;
+    });
+  }
+
+  container.innerHTML = html;
+
+  if (quickSearchSelectedIdx >= quickSearchNavItems.length) {
+    quickSearchSelectedIdx = 0;
+  }
+  const allRendered = container.querySelectorAll('.quicksearch-item');
+  allRendered.forEach((el, i) => {
+    el.classList.toggle('active', i === quickSearchSelectedIdx);
+  });
 
   container.querySelectorAll('.quicksearch-item').forEach(el => {
     el.addEventListener('click', () => {
-      openTab(el.dataset.key);
-      closeQuickSearch();
+      const i = parseInt(el.dataset.idx, 10);
+      if (quickSearchNavItems[i]) {
+        quickSearchNavItems[i].run();
+      }
     });
   });
 }
@@ -971,10 +1224,8 @@ if ($('quickSearchInput')) {
       items[quickSearchSelectedIdx]?.scrollIntoView({ block: 'nearest' });
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const activeEl = items[quickSearchSelectedIdx];
-      if (activeEl) {
-        openTab(activeEl.dataset.key);
-        closeQuickSearch();
+      if (quickSearchNavItems[quickSearchSelectedIdx]) {
+        quickSearchNavItems[quickSearchSelectedIdx].run();
       }
     } else if (e.key === 'Escape') {
       closeQuickSearch();
@@ -1219,12 +1470,32 @@ document.addEventListener('touchend', e => {
   }
 }, { passive: true });
 
-$('collapseSidebarBtn').addEventListener('click', () => {
+$('collapseSidebarBtn')?.addEventListener('click', () => {
   $('sidebar').classList.add('collapsed');
 });
 $('sidebarBackdrop').addEventListener('click', closeSidebar);
 $('daysList').addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
 $('newDayBtn').addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); pickDateModal(); });
+
+// Calendário Accordion na Sidebar
+function toggleCalAccordion() {
+  const acc = $('calAccordion');
+  if (!acc) return;
+  acc.classList.toggle('collapsed');
+  try {
+    localStorage.setItem('personalmk_cal_collapsed', acc.classList.contains('collapsed') ? '1' : '0');
+  } catch (_) {}
+}
+$('calAccordionHeader')?.addEventListener('click', toggleCalAccordion);
+$('calAccordionHeader')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    toggleCalAccordion();
+  }
+});
+$('searchKbdBadge')?.addEventListener('click', () => {
+  openQuickSearch();
+});
 
 /* ────── Tabs ────── */
 let openTabs = [], activeTab = null;
@@ -1299,14 +1570,14 @@ function showEditor(key) {
   }
 }
 function setSave(s) {
-  $('saveStatus').className = '';
+  const el = $('saveStatus');
+  if (!el) return;
+  el.className = 'save-status-badge ' + (s === 'saved' ? 'saved' : 'saving');
   const icon = $('saveStatusIcon');
   if (s === 'saved') {
-    $('saveStatus').classList.add('saved');
     $('saveStatusText').textContent = 'Salvo';
     if (icon) icon.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
   } else {
-    $('saveStatus').classList.add('saving');
     $('saveStatusText').textContent = 'Salvando...';
     if (icon) icon.innerHTML = '<path d="M21 12a9 9 0 1 1-6.219-8.56"></path>';
   }
@@ -2793,17 +3064,14 @@ async function initApp() {
   try { await initIDB(); } catch (e) { console.warn('IDB init warning:', e); }
 
   const mode = localStorage.getItem(SK_MODE);
+  try {
+    if (localStorage.getItem('personalmk_cal_collapsed') === '1') {
+      $('calAccordion')?.classList.add('collapsed');
+    }
+  } catch (_) {}
 
-  if (mode === 'offline' || !FB_ON) {
-    hideAuthScreen();
-    setSyncStatus('offline');
-    updateUserBar();
-    await initApp();
-  } else {
-    // Show auth screen immediately so all buttons and tabs are interactive right away
-    showAuthScreen();
-
-    // Firebase auth listener
+  // Firebase auth listener: always registered so login from offline mode triggers immediately
+  if (FB_ON && auth) {
     auth.onAuthStateChanged(async user => {
       currentUser = user || null;
       if (user) {
@@ -2828,5 +3096,17 @@ async function initApp() {
         }
       }
     });
+  }
+
+  if (mode === 'offline' || !FB_ON) {
+    hideAuthScreen();
+    setSyncStatus('offline');
+    updateUserBar();
+    await initApp();
+  } else {
+    // Show auth screen immediately so all buttons and tabs are interactive right away
+    if (!currentUser) {
+      showAuthScreen();
+    }
   }
 })();
