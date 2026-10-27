@@ -32,8 +32,7 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const req = event.request;
-  // Só faz cache de GETs do próprio site. POSTs (Gemini, Spotify token) e APIs externas
-  // passam direto — cache.put em POST lança erro e quebrava essas chamadas.
+ 
   if (req.method !== 'GET') return;
   if (new URL(req.url).origin !== self.location.origin) return;
 
