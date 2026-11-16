@@ -769,32 +769,80 @@ body {
   border-color: var(--border-focus);
 }
 
-/* User Account Profile Card */
-.user-bar {
+/* Top-right Account Avatar & Popover Menu */
+.top-user-widget {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 120;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 9px;
-  background: var(--bg-card);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
 }
 
-.user-avatar {
-  width: 26px;
-  height: 26px;
+.user-avatar-trigger {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   background: var(--brand);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1.5px solid var(--border-strong);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: inherit;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.user-avatar-trigger:hover {
+  transform: scale(1.05);
+  border-color: var(--brand);
+}
+
+.user-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 248px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 200;
+  animation: modalIn 0.15s ease;
+}
+
+.user-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 4px 6px;
+}
+
+.user-popover-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--brand);
   color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   overflow: hidden;
   cursor: pointer;
+  border: 1px solid var(--border-strong);
 }
 
 .user-info {
@@ -803,7 +851,7 @@ body {
 }
 
 .user-email {
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
@@ -812,24 +860,59 @@ body {
 }
 
 .user-mode {
-  font-size: 9.5px;
+  font-size: 10px;
   color: var(--text-muted);
 }
 
-.user-logout {
-  background: none;
+.user-popover-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+
+.user-popover-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
   border: none;
-  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
   cursor: pointer;
-  font-size: 13px;
-  padding: 3px;
-  border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
+  text-align: left;
+  transition: background 0.15s, color 0.15s;
 }
 
-.user-logout:hover {
+.user-popover-item svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.user-popover-item:hover {
+  background: var(--bg-card-hover);
+}
+
+.user-popover-item.danger {
   color: var(--danger);
-  background: rgba(239, 68, 68, 0.1);
+}
+
+.user-popover-item.danger svg {
+  color: var(--danger);
+}
+
+.user-popover-item.danger:hover {
+  background: rgba(239, 68, 68, 0.12);
 }
 
 /* Botão Principal Destacado: Nova Anotação (Notion/Linear style) */
@@ -1673,6 +1756,7 @@ body {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  position: relative;
 }
 
 /* TABS BAR (includes hamburger) */
@@ -1683,7 +1767,7 @@ body {
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-bottom: 1px solid var(--border);
-  padding: 0 12px;
+  padding: 0 54px 0 12px;
   gap: 2px;
   min-height: 44px;
   overflow-x: auto;
@@ -2771,10 +2855,17 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     text-align: center;
   }
 
+  .top-user-widget {
+    top: max(14px, calc(var(--sat) + 2px));
+    right: max(14px, var(--sar));
+    z-index: 1005;
+  }
+
   .mobile-header-actions {
     display: flex;
     align-items: center;
     gap: 6px;
+    padding-right: 40px;
   }
 
   .mobile-icon-btn {

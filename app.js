@@ -101,6 +101,49 @@ function isContentEmpty(html) {
   return text.length === 0;
 }
 
+function hasRealContent(day) {
+  if (!day) return false;
+  return !isContentEmpty(day.content) ||
+    (Array.isArray(day.tags) && day.tags.length > 0) ||
+    (Array.isArray(day.checklist) && day.checklist.length > 0) ||
+    (Array.isArray(day.images) && day.images.length > 0);
+}
+
+function migrateAnonymousToUserCache() {
+  if (!currentUser) return false;
+  let rawAnon = null;
+  try {
+    rawAnon = JSON.parse(localStorage.getItem(SK) || 'null');
+  } catch { return false; }
+  if (!rawAnon || typeof rawAnon !== 'object') return false;
+
+  const userLocal = loadLocal();
+  let changed = false;
+  const migratedKeys = [];
+  Object.entries(rawAnon).forEach(([key, anonDoc]) => {
+    if (!hasRealContent(anonDoc)) return;
+    const targetDoc = {
+      content: anonDoc.content || '',
+      tags: Array.isArray(anonDoc.tags) ? anonDoc.tags : [],
+      images: Array.isArray(anonDoc.images) ? anonDoc.images : [],
+      checklist: Array.isArray(anonDoc.checklist) ? anonDoc.checklist : [],
+      updatedAt: anonDoc.updatedAt || null
+    };
+    if (mergeRemoteDay(key, targetDoc, userLocal)) {
+      changed = true;
+    }
+    migratedKeys.push(key);
+  });
+
+  if (changed) saveLocal(userLocal);
+  if (migratedKeys.length > 0) {
+    migratedKeys.forEach(k => delete rawAnon[k]);
+    if (Object.keys(rawAnon).length === 0) localStorage.removeItem(SK);
+    else localStorage.setItem(SK, JSON.stringify(rawAnon));
+  }
+  return changed;
+}
+
 function mergeRemoteDay(key, remoteDoc, localData) {
   const localDoc = localData[key];
   if (!localDoc) {
@@ -108,8 +151,8 @@ function mergeRemoteDay(key, remoteDoc, localData) {
     return true;
   }
   
-  const remoteEmpty = isContentEmpty(remoteDoc.content) && (!remoteDoc.checklist || remoteDoc.checklist.length === 0) && (!remoteDoc.images || remoteDoc.images.length === 0);
-  const localEmpty = isContentEmpty(localDoc.content) && (!localDoc.checklist || localDoc.checklist.length === 0) && (!localDoc.images || localDoc.images.length === 0);
+  const remoteEmpty = !hasRealContent(remoteDoc);
+  const localEmpty = !hasRealContent(localDoc);
   
   // Rule 1: A placeholder/empty local note NEVER overwrites a cloud note with content
   if (localEmpty && !remoteEmpty) {
@@ -138,6 +181,26 @@ function mergeRemoteDay(key, remoteDoc, localData) {
   return false;
 }
 
+function applyRemoteEditorUpdate(local, activeTabChanged) {
+  if (!activeTabChanged || !activeTab) return;
+  if (!local[activeTab]) {
+    if (openTabs.includes(activeTab)) closeTab(activeTab);
+    return;
+  }
+  if (document.activeElement === $('editor')) return;
+  isApplyingRemoteChange = true;
+  const day = local[activeTab];
+  $('editor').innerHTML = day.content || '';
+  currentTags = day.tags ? [...day.tags] : [];
+  renderTagsInEditor();
+  currentChecklist = day.checklist ? [...day.checklist] : [];
+  if (typeof renderChecklist === 'function') renderChecklist();
+  if (typeof renderGallery === 'function') renderGallery();
+  updateWC();
+  $('currentDaySubtitle').textContent = day.updatedAt ? `Última edição: ${new Date(day.updatedAt).toLocaleString('pt-BR')}` : 'Sincronizado';
+  isApplyingRemoteChange = false;
+}
+
 function startRealtimeSync() {
   if (!db || !currentUser || !FB_ON) return;
   if (realtimeUnsubscribe) {
@@ -160,14 +223,18 @@ function startRealtimeSync() {
         if (doc.metadata && doc.metadata.hasPendingWrites) return;
 
         const key = doc.id;
-        if (change.type === 'removed') {
+        const raw = doc.data();
+        if (change.type === 'removed' || raw?.deleted) {
           if (local[key]) {
-            delete local[key];
-            hasChanges = true;
-            if (activeTab === key) activeTabChanged = true;
+            const remTime = raw?.updatedAt?.toDate?.()?.getTime?.() || (raw?.updatedAt ? new Date(raw.updatedAt).getTime() : 0);
+            const locTime = local[key].updatedAt ? new Date(local[key].updatedAt).getTime() : 0;
+            if (change.type === 'removed' || !locTime || remTime >= locTime) {
+              delete local[key];
+              hasChanges = true;
+              if (activeTab === key) activeTabChanged = true;
+            }
           }
         } else {
-          const raw = doc.data();
           const remote = {
             content: raw.content || '',
             tags: raw.tags || [],
@@ -188,23 +255,7 @@ function startRealtimeSync() {
         renderSidebar($('searchInput')?.value || '');
         renderTagFilterBar();
         renderCalendar();
-
-        if (activeTabChanged && activeTab && local[activeTab]) {
-          const isUserTyping = document.activeElement === $('editor');
-          if (!isUserTyping) {
-            isApplyingRemoteChange = true;
-            const day = local[activeTab];
-            $('editor').innerHTML = day.content || '';
-            currentTags = day.tags ? [...day.tags] : [];
-            renderTagsInEditor();
-            currentChecklist = day.checklist ? [...day.checklist] : [];
-            if (typeof renderChecklist === 'function') renderChecklist();
-            if (typeof renderGallery === 'function') renderGallery();
-            updateWC();
-            $('currentDaySubtitle').textContent = day.updatedAt ? `Última edição: ${new Date(day.updatedAt).toLocaleString('pt-BR')}` : 'Sincronizado';
-            isApplyingRemoteChange = false;
-          }
-        }
+        applyRemoteEditorUpdate(local, activeTabChanged);
       }
     }, err => {
       console.warn('Realtime sync warning:', err);
@@ -220,45 +271,91 @@ async function checkAndSyncCloud() {
   if (!currentUser || !FB_ON) return;
   try {
     setSyncStatus('syncing');
+    const migrated = migrateAnonymousToUserCache();
     const snap = await userDaysRef().get();
     const local = loadLocal();
-    let hasChanges = false;
+    const remoteDocs = {};
+    let hasChanges = migrated;
     let activeTabChanged = false;
 
     snap.forEach(doc => {
       const raw = doc.data();
+      const updIso = raw.updatedAt?.toDate?.()?.toISOString() || raw.updatedAt || null;
+      if (raw.deleted) {
+        const remTime = updIso ? new Date(updIso).getTime() : 0;
+        remoteDocs[doc.id] = { deleted: true, updatedAt: updIso, time: remTime };
+        if (local[doc.id]) {
+          const locTime = local[doc.id].updatedAt ? new Date(local[doc.id].updatedAt).getTime() : 0;
+          if (!locTime || remTime >= locTime) {
+            delete local[doc.id];
+            hasChanges = true;
+            if (activeTab === doc.id) activeTabChanged = true;
+          }
+        }
+        return;
+      }
+
       const remote = {
         content: raw.content || '',
         tags: raw.tags || [],
         images: raw.images || [],
         checklist: raw.checklist || [],
-        updatedAt: raw.updatedAt?.toDate?.()?.toISOString() || raw.updatedAt || null
+        updatedAt: updIso
       };
+      remoteDocs[doc.id] = remote;
       if (mergeRemoteDay(doc.id, remote, local)) {
         hasChanges = true;
         if (activeTab === doc.id) activeTabChanged = true;
       }
     });
 
+    // Upload local notes missing from Firestore or newer than Firestore
+    const uploadPromises = [];
+    Object.entries(local).forEach(([key, localDoc]) => {
+      if (!hasRealContent(localDoc)) return;
+      const rem = remoteDocs[key];
+      const localTime = localDoc.updatedAt ? new Date(localDoc.updatedAt).getTime() : 0;
+      let shouldUpload = false;
+
+      if (!rem) {
+        shouldUpload = true;
+      } else if (rem.deleted) {
+        if (localTime > (rem.time || 0)) shouldUpload = true;
+      } else {
+        const remoteTime = rem.updatedAt ? new Date(rem.updatedAt).getTime() : 0;
+        const differs = localDoc.content !== rem.content ||
+          JSON.stringify(localDoc.tags || []) !== JSON.stringify(rem.tags || []) ||
+          JSON.stringify(localDoc.images || []) !== JSON.stringify(rem.images || []) ||
+          JSON.stringify(localDoc.checklist || []) !== JSON.stringify(rem.checklist || []);
+        if ((localTime > remoteTime || !remoteTime) && differs) {
+          shouldUpload = true;
+        }
+      }
+
+      if (shouldUpload) {
+        uploadPromises.push(
+          userDaysRef().doc(key).set({
+            content: localDoc.content || '',
+            tags: localDoc.tags || [],
+            images: localDoc.images || [],
+            checklist: localDoc.checklist || [],
+            deleted: false,
+            updatedAt: localDoc.updatedAt ? new Date(localDoc.updatedAt) : firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true })
+        );
+      }
+    });
+
+    if (uploadPromises.length > 0) {
+      await Promise.allSettled(uploadPromises);
+    }
+
     if (hasChanges) {
       saveLocal(local);
       renderSidebar($('searchInput')?.value || '');
       renderTagFilterBar();
       renderCalendar();
-
-      if (activeTabChanged && activeTab && local[activeTab] && document.activeElement !== $('editor')) {
-        isApplyingRemoteChange = true;
-        const day = local[activeTab];
-        $('editor').innerHTML = day.content || '';
-        currentTags = day.tags ? [...day.tags] : [];
-        renderTagsInEditor();
-        currentChecklist = day.checklist ? [...day.checklist] : [];
-        if (typeof renderChecklist === 'function') renderChecklist();
-        if (typeof renderGallery === 'function') renderGallery();
-        updateWC();
-        $('currentDaySubtitle').textContent = day.updatedAt ? `Última edição: ${new Date(day.updatedAt).toLocaleString('pt-BR')}` : 'Sincronizado';
-        isApplyingRemoteChange = false;
-      }
+      applyRemoteEditorUpdate(local, activeTabChanged);
     }
     setSyncStatus('synced');
   } catch (err) {
@@ -276,6 +373,7 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
       tags: tags || [], 
       images: images || [], 
       checklist: checklist || [], 
+      deleted: false,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
     }, { merge: true });
     setSyncStatus('synced');
@@ -287,7 +385,16 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
 
 async function cloudDeleteDay(key) {
   if (!db || !currentUser) return;
-  try { await userDaysRef().doc(key).delete(); } catch (e) { }
+  try {
+    await userDaysRef().doc(key).set({
+      deleted: true,
+      content: '',
+      tags: [],
+      images: [],
+      checklist: [],
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  } catch (e) { }
 }
 
 async function cloudLoadAll() {
@@ -548,6 +655,9 @@ $('authSubmitBtn').addEventListener('click', doAuth);
   $(id).addEventListener('keydown', e => { if (e.key === 'Enter') doAuth(); });
 });
 
+let isAuthInitializing = false;
+let initializedForKey = undefined;
+
 async function doAuth() {
   const email = $('authEmail').value.trim();
   const pass = $('authPassword').value;
@@ -562,6 +672,7 @@ async function doAuth() {
   btn.disabled = true;
   $('authBtnLabel').innerHTML = '<div class="auth-spinner"></div>';
   errEl.textContent = '';
+  isAuthInitializing = true;
 
   try {
     let cred;
@@ -576,8 +687,9 @@ async function doAuth() {
       btn.disabled = false;
       $('authBtnLabel').textContent = authMode === 'login' ? 'Entrar no PersonalMk' : 'Criar conta gratuita';
       hideAuthScreen();
-      setSyncStatus('online');
+      setSyncStatus('syncing');
       updateUserBar();
+      initializedForKey = cred.user.uid;
       await initApp();
       showToast(authMode === 'login' ? 'Login realizado com sucesso!' : 'Conta criada com sucesso!');
     }
@@ -594,6 +706,8 @@ async function doAuth() {
     errEl.textContent = msgs[e.code] || 'Erro: ' + e.message;
     btn.disabled = false;
     $('authBtnLabel').textContent = authMode === 'login' ? 'Entrar no PersonalMk' : 'Criar conta gratuita';
+  } finally {
+    isAuthInitializing = false;
   }
 }
 
@@ -604,6 +718,7 @@ $('mobileThemeBtn')?.addEventListener('click', toggleTheme);
 
 function goOffline() {
   currentUser = null;
+  initializedForKey = 'offline';
   localStorage.setItem(SK_MODE, 'offline');
   hideAuthScreen();
   setSyncStatus('offline');
@@ -618,6 +733,7 @@ function doLogout() {
   }
   if (auth) auth.signOut();
   currentUser = null;
+  initializedForKey = undefined;
   localStorage.setItem(SK_MODE, 'offline');
   // Reset state
   openTabs = []; activeTab = null;
@@ -627,7 +743,45 @@ function doLogout() {
   if (FB_ON) showAuthScreen();
 }
 
+function closeUserPopover() {
+  const bar = $('userBar');
+  const trigger = $('userAvatar');
+  if (bar) bar.style.display = 'none';
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+function toggleUserPopover() {
+  const bar = $('userBar');
+  const trigger = $('userAvatar');
+  if (!bar) return;
+  const isOpen = bar.style.display === 'flex';
+  bar.style.display = isOpen ? 'none' : 'flex';
+  if (trigger) trigger.setAttribute('aria-expanded', String(!isOpen));
+}
+
+function setAvatarVisual(content, isHtml) {
+  [$('userAvatar'), $('userPopoverAvatar')].forEach(el => {
+    if (!el) return;
+    if (isHtml) el.innerHTML = content;
+    else el.textContent = content;
+  });
+}
+
+$('userAvatar')?.addEventListener('click', e => {
+  e.stopPropagation();
+  toggleUserPopover();
+});
+
+document.addEventListener('click', e => {
+  const bar = $('userBar');
+  const widget = $('topUserWidget');
+  if (bar && bar.style.display === 'flex' && widget && !widget.contains(e.target)) {
+    closeUserPopover();
+  }
+});
+
 $('logoutBtn').addEventListener('click', () => {
+  closeUserPopover();
   if (!currentUser) {
     showAuthScreen();
     return;
@@ -640,6 +794,32 @@ $('logoutBtn').addEventListener('click', () => {
       { label: 'Sair', cls: 'btn-danger', cb: doLogout }
     ]
   });
+});
+
+$('syncBar')?.addEventListener('click', () => {
+  if (!currentUser || !FB_ON) {
+    if (FB_ON) showAuthScreen();
+    else showToast('Modo offline ativo.', true);
+    return;
+  }
+  showToast('Sincronizando conta com a nuvem...', '✓');
+  checkAndSyncCloud();
+});
+
+$('syncNowMenuBtn')?.addEventListener('click', () => {
+  closeUserPopover();
+  if (!currentUser || !FB_ON) {
+    if (FB_ON) showAuthScreen();
+    else showToast('Modo offline ativo.', true);
+    return;
+  }
+  showToast('Sincronizando conta com a nuvem...', '✓');
+  checkAndSyncCloud();
+});
+
+$('settingsMenuBtn')?.addEventListener('click', () => {
+  closeUserPopover();
+  openSettings();
 });
 
 $('mobileSyncIndicator')?.addEventListener('click', () => {
@@ -659,7 +839,8 @@ avatarInput.accept = 'image/*';
 avatarInput.style.display = 'none';
 document.body.appendChild(avatarInput);
 
-$('userAvatar').addEventListener('click', () => avatarInput.click());
+$('userPopoverAvatar')?.addEventListener('click', () => { closeUserPopover(); avatarInput.click(); });
+$('changeAvatarBtn')?.addEventListener('click', () => { closeUserPopover(); avatarInput.click(); });
 
 avatarInput.addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -682,45 +863,51 @@ avatarInput.addEventListener('change', (e) => {
       const base64 = canvas.toDataURL('image/jpeg', 0.8);
 
       localStorage.setItem('userAvatarBase64', base64);
-      $('userAvatar').innerHTML = '<img src="' + base64 + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+      setAvatarVisual('<img src="' + base64 + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">', true);
 
       if (currentUser && FB_ON) {
         db.collection('users').doc(currentUser.uid).set({ avatar: base64 }, { merge: true });
       }
+      toast('Foto de perfil atualizada!', '✓');
     };
     img.src = event.target.result;
   };
   reader.readAsDataURL(file);
 });
 function updateUserBar() {
-  const bar = $('userBar');
+  const widget = $('topUserWidget');
+  const lBtn = $('logoutBtn');
+  const syncMenuBtn = $('syncNowMenuBtn');
   if (currentUser && !currentUser.isAnonymous) {
-    bar.style.display = 'flex';
+    if (widget) widget.style.display = 'flex';
     const email = currentUser.email || '';
     $('userEmail').textContent = email;
     const savedAvatar = localStorage.getItem('userAvatarBase64');
-    if (savedAvatar) $('userAvatar').innerHTML = '<img src="' + savedAvatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
-    else $('userAvatar').textContent = (email[0] || '?').toUpperCase();
+    if (savedAvatar) setAvatarVisual('<img src="' + savedAvatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">', true);
+    else setAvatarVisual((email[0] || '?').toUpperCase(), false);
     $('userMode').textContent = FB_ON ? 'Sincronizado na nuvem' : 'Modo local';
-    const lBtn = $('logoutBtn');
+    if (syncMenuBtn) syncMenuBtn.style.display = '';
     if (lBtn) {
       lBtn.title = 'Sair da conta';
-      lBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+      lBtn.classList.add('danger');
+      lBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span id="logoutBtnLabel">Sair da conta</span>';
     }
     setSyncStatus('synced');
   } else if (currentUser === null) {
-    bar.style.display = 'flex';
+    if (widget) widget.style.display = 'flex';
     $('userEmail').textContent = 'Modo offline';
-    $('userAvatar').innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
-    $('userMode').textContent = 'Toque para entrar / sincronizar';
-    const lBtn = $('logoutBtn');
+    setAvatarVisual('<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>', true);
+    $('userMode').textContent = 'Entrar para sincronizar';
+    if (syncMenuBtn) syncMenuBtn.style.display = 'none';
     if (lBtn) {
       lBtn.title = 'Fazer Login / Conectar';
-      lBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>';
+      lBtn.classList.remove('danger');
+      lBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg><span id="logoutBtnLabel">Entrar / Criar conta</span>';
     }
     setSyncStatus('offline');
   } else {
-    bar.style.display = 'none';
+    if (widget) widget.style.display = 'none';
+    closeUserPopover();
   }
 }
 /* ────── Fuzzy Search Engine ────── */
@@ -1499,6 +1686,16 @@ $('searchKbdBadge')?.addEventListener('click', () => {
 
 /* ────── Tabs ────── */
 let openTabs = [], activeTab = null;
+function lastTabKey() { return currentUser ? `${SK}_last_tab_${currentUser.uid}` : `${SK}_last_tab`; }
+function openTabsKey() { return currentUser ? `${SK}_open_tabs_${currentUser.uid}` : `${SK}_open_tabs`; }
+function saveTabState() {
+  try {
+    if (activeTab) localStorage.setItem(lastTabKey(), activeTab);
+    else localStorage.removeItem(lastTabKey());
+    localStorage.setItem(openTabsKey(), JSON.stringify(openTabs));
+  } catch (_) {}
+}
+
 function renderTabs() {
   const bar = $('tabsBar');
   if (!bar) return;
@@ -1526,11 +1723,13 @@ function activateTab(key) {
   calYear = d.getFullYear();
   calMonth = d.getMonth();
   calView = 'days';
+  saveTabState();
   renderTabs(); renderSidebar($('searchInput').value); renderCalendar(); showEditor(key);
 }
 function closeTab(key) {
   openTabs = openTabs.filter(k => k !== key);
   if (activeTab === key) activeTab = openTabs[openTabs.length - 1] || null;
+  saveTabState();
   renderTabs();
   if (activeTab) { renderSidebar($('searchInput').value); showEditor(activeTab); }
   else { showWelcome(); renderSidebar($('searchInput').value); }
@@ -1595,33 +1794,144 @@ async function saveCurrent() {
   $('currentDaySubtitle').textContent = `Última edição: ${new Date().toLocaleString('pt-BR')}`;
 }
 const doSave = debounce(saveCurrent, 700);
-function handleCalculator() {
-  const sel = window.getSelection();
-  if (!sel || !sel.rangeCount) return;
-  const node = sel.focusNode;
-  if (node && node.nodeType === Node.TEXT_NODE) {
-    const text = node.textContent;
-    const match = text.match(/([0-9][0-9\.\s\+\-\*\/\(\)]*)=$/);
-    if (match) {
-      try {
-        const expr = match[1].replace(/[^-()\d/*+.]/g, '');
-        if (!expr) return;
-        const res = new Function('return ' + expr)();
-        if (isFinite(res)) {
-          const replaced = text.replace(match[0], match[0] + ' ' + res);
-          node.textContent = replaced;
-          const range = document.createRange();
-          range.setStart(node, replaced.length);
-          range.collapse(true);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-      } catch (e) { }
-    }
+window.addEventListener('beforeunload', () => {
+  if (activeTab && !isApplyingRemoteChange) saveCurrent();
+});
+
+function fmtCalcNum(n) {
+  if (!isFinite(n)) return '';
+  if (Object.is(n, -0)) return '0';
+  if (Math.abs(n) >= 1e15 || (n !== 0 && Math.abs(n) < 1e-10)) {
+    return String(Number(n.toPrecision(12)));
+  }
+  return String(Number(n.toFixed(10)));
+}
+
+function evalMathExpr(rawExpr) {
+  try {
+    let s = String(rawExpr || '').trim();
+    if (!s) return null;
+
+    // 1. Vírgula decimal entre dígitos -> marcador temporário
+    s = s.replace(/(\d),(\d)/g, '$1__DEC__$2');
+    // 2. Ponto "." somente entre números/parênteses -> multiplicação
+    s = s.replace(/(\d|\))\s*\.\s*(?=\s*(?:\d|\())/g, '$1 __MUL__ ');
+    // 3. x, X ou × entre números/parênteses -> multiplicação
+    s = s.replace(/(\d|\))\s*[xX×]\s*(?=[+\-−–]?\s*(?:\d|\(|√))/g, '$1 __MUL__ ');
+    // 4. Potenciação (*, ** ou ^)
+    s = s.replace(/\*{1,2}|\^/g, '**');
+    // 5. Restaura multiplicação e vírgula decimal
+    s = s.replace(/__MUL__/g, '*').replace(/__DEC__/g, '.');
+    // 6. Divisão (/ ou \ ou ÷) e subtração (− ou –)
+    s = s.replace(/[\\÷]/g, '/').replace(/[−–]/g, '-');
+    // 7. Raiz quadrada: √(expr) ou √num
+    s = s.replace(/√\s*\(([^)]+)\)/g, 'Math.sqrt($1)').replace(/√\s*(\d+(?:\.\d+)?)/g, 'Math.sqrt($1)');
+    // 8. Porcentagem: a + b% -> (a + (a * b / 100)) e b% -> (b / 100)
+    s = s.replace(/(\d+(?:\.\d+)?)\s*([+\-])\s*(\d+(?:\.\d+)?)%/g, '($1 $2 ($1 * $3 / 100))');
+    s = s.replace(/(\d+(?:\.\d+)?)%/g, '($1 / 100)');
+    // Previne ++ ou -- inválido em sequência
+    s = s.replace(/--/g, '- -').replace(/\+\+/g, '+ +');
+
+    const safeCheck = s.replace(/Math\.sqrt\(/g, '(');
+    if (!/^[0-9+\-*/().\s]+$/.test(safeCheck)) return null;
+
+    const res = new Function('return (' + s + ')')();
+    return (typeof res === 'number' && isFinite(res)) ? res : null;
+  } catch (e) {
+    return null;
   }
 }
 
-$('editor').addEventListener('input', () => { handleCalculator(); setSave('saving'); updateWC(); doSave(); });
+let lastCalcNode = null;
+let lastCalcTextLen = 0;
+
+function handleCalculator(e) {
+  const sel = window.getSelection();
+  const node = (sel && sel.rangeCount && sel.isCollapsed) ? sel.focusNode : null;
+  const isTextNode = !!(node && node.nodeType === Node.TEXT_NODE);
+  const text = isTextNode ? (node.textContent || '') : '';
+  const shrank = isTextNode && node === lastCalcNode && text.length < lastCalcTextLen;
+
+  if (isTextNode) {
+    lastCalcNode = node;
+    lastCalcTextLen = text.length;
+  }
+
+  // Não recalcular ao apagar (Backspace/Delete ou redução no teclado móvel), desfazer ou colar/quebrar linha
+  if (shrank) return;
+  if (e && e.inputType) {
+    if (e.inputType.startsWith('delete') ||
+        e.inputType.startsWith('history') ||
+        e.inputType === 'insertFromPaste' ||
+        e.inputType === 'insertParagraph' ||
+        e.inputType === 'insertLineBreak') {
+      return;
+    }
+  }
+  if (e && typeof e.data === 'string' && !e.data.includes('=')) {
+    return;
+  }
+  if (!isTextNode) return;
+
+  const caretPos = sel.focusOffset;
+  const beforeCaret = text.slice(0, caretPos);
+  const afterCaret = text.slice(caretPos);
+
+  if (!beforeCaret.endsWith('=')) return;
+  if (afterCaret.length > 0 && !/^[\s\u00A0]/.test(afterCaret)) return;
+
+  let resultText = null;
+
+  // 1. Comparações (<, >, <>, <=, >=)
+  const cmpMatch = beforeCaret.match(/(?:^|[^\w<>])((?:√\s*\(\s*|√\s*|\(\s*|[+\-−–](?=\d|√|\())*\d[\d.,\s+\-−–xX×*\/\\÷^%()√]*?)\s*(<>|<=|>=|<|>)\s*((?:√\s*\(\s*|√\s*|\(\s*|[+\-−–](?=\d|√|\())*\d[\d.,\s+\-−–xX×*\/\\÷^%()√]*?)\s*=$/);
+  if (cmpMatch) {
+    const a = evalMathExpr(cmpMatch[1]);
+    const op = cmpMatch[2];
+    const b = evalMathExpr(cmpMatch[3]);
+    if (a !== null && b !== null) {
+      const fa = fmtCalcNum(a);
+      const fb = fmtCalcNum(b);
+      let relText;
+      if (a < b) relText = `${fa} é menor que ${fb}`;
+      else if (a > b) relText = `${fa} é maior que ${fb}`;
+      else relText = `${fa} é igual a ${fb}`;
+
+      if (op === '<>') resultText = relText;
+      else if (op === '<') resultText = a < b ? relText : `Falso (${relText})`;
+      else if (op === '>') resultText = a > b ? relText : `Falso (${relText})`;
+      else if (op === '<=') resultText = a <= b ? relText : `Falso (${relText})`;
+      else if (op === '>=') resultText = a >= b ? relText : `Falso (${relText})`;
+    }
+  }
+
+  // 2. Expressões aritméticas
+  if (resultText === null) {
+    const mathMatch = beforeCaret.match(/(?:^|[^\w/\\:])((?:√\s*\(\s*|√\s*|\(\s*|[+\-−–](?=\d|√|\())*\d[\d.,\s+\-−–xX×*\/\\÷^%()√]*)=$/);
+    if (mathMatch) {
+      const exprRaw = mathMatch[1];
+      const hasOp = /[+\-−–xX×*\/\\÷^%√]|\d\s*\.\s*\d/.test(exprRaw);
+      if (hasOp) {
+        const res = evalMathExpr(exprRaw);
+        if (res !== null) resultText = fmtCalcNum(res);
+      }
+    }
+  }
+
+  if (resultText !== null) {
+    const replaced = beforeCaret + ' ' + resultText + afterCaret;
+    node.textContent = replaced;
+    lastCalcNode = node;
+    lastCalcTextLen = replaced.length;
+    const newPos = beforeCaret.length + 1 + resultText.length;
+    const range = document.createRange();
+    range.setStart(node, newPos);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
+
+$('editor').addEventListener('input', e => { handleCalculator(e); setSave('saving'); updateWC(); doSave(); });
 
 /* Tags in editor */
 function renderTagsInEditor() {
@@ -1898,14 +2208,30 @@ $('restoreFileInput').addEventListener('change', e => {
           { label: 'Cancelar', cls: 'btn-cancel' },
           {
             label: 'Mesclar', cls: 'btn-secondary', cb: () => {
-              const cur = loadLocal(); Object.assign(cur, importedDays); saveLocal(cur);
-              refreshAll(); toast(`${count} dia(s) importados (mesclado).`, '');
+              const cur = loadLocal();
+              Object.entries(importedDays).forEach(([k, v]) => {
+                if (v && typeof v === 'object') {
+                  cur[k] = { ...v, updatedAt: v.updatedAt || new Date().toISOString() };
+                }
+              });
+              saveLocal(cur);
+              refreshAll();
+              if (currentUser && FB_ON) checkAndSyncCloud();
+              toast(`${count} dia(s) importados (mesclado).`, '');
             }
           },
           {
             label: 'Substituir tudo', cls: 'btn-danger', cb: () => {
-              saveLocal(importedDays); openTabs = []; activeTab = null;
-              refreshAll(); showWelcome(); toast(`${count} dia(s) importados.`, '');
+              const prepared = {};
+              Object.entries(importedDays).forEach(([k, v]) => {
+                if (v && typeof v === 'object') {
+                  prepared[k] = { ...v, updatedAt: v.updatedAt || new Date().toISOString() };
+                }
+              });
+              saveLocal(prepared); openTabs = []; activeTab = null; saveTabState();
+              refreshAll(); showWelcome();
+              if (currentUser && FB_ON) checkAndSyncCloud();
+              toast(`${count} dia(s) importados.`, '');
             }
           }
         ]
@@ -1966,9 +2292,11 @@ window.addEventListener('keydown', e => {
     return;
   }
 
-  // 5. Escape: Fechar modais abertos
+  // 5. Escape: Fechar modais/popovers abertos
   if (e.key === 'Escape') {
-    if ($('quicksearch-overlay') && $('quicksearch-overlay').classList.contains('show')) {
+    if ($('userBar') && $('userBar').style.display === 'flex') {
+      closeUserPopover();
+    } else if ($('quicksearch-overlay') && $('quicksearch-overlay').classList.contains('show')) {
       closeQuickSearch();
     } else if ($('spotify-overlay') && $('spotify-overlay').classList.contains('show')) {
       closeSpotifyModal();
@@ -3002,7 +3330,9 @@ async function dailyTick() {
 }
 setInterval(dailyTick, 30000);
 document.addEventListener('visibilitychange', () => { 
-  if (!document.hidden) {
+  if (document.hidden) {
+    if (activeTab && !isApplyingRemoteChange) saveCurrent();
+  } else {
     dailyTick(); 
     if (currentUser && FB_ON) checkAndSyncCloud();
   }
@@ -3038,12 +3368,36 @@ async function initApp() {
     }
   }
   refreshAll();
-  const today = todayKey(); const data = loadLocal();
-  if (data[today]) openTab(today);
-  else if (allKeys().length > 0) openTab(allKeys()[0]);
-  else showWelcome();
+  const today = todayKey();
+  const data = loadLocal();
+
+  try {
+    const rawTabs = JSON.parse(localStorage.getItem(openTabsKey()) || '[]');
+    if (Array.isArray(rawTabs)) {
+      openTabs = rawTabs.filter(k => typeof k === 'string' && (data[k] || k === today));
+    }
+  } catch (_) {}
+
+  let savedLastTab = null;
+  try {
+    savedLastTab = localStorage.getItem(lastTabKey());
+  } catch (_) {}
+
+  if (savedLastTab && data[savedLastTab] && (savedLastTab === today || hasRealContent(data[savedLastTab]))) {
+    openTab(savedLastTab);
+  } else if (data[today]) {
+    openTab(today);
+  } else if (allKeys().length > 0) {
+    // Nunca pular automaticamente para notas futuras (ex: 2036); abre o dia de hoje
+    openTab(today);
+  } else {
+    showWelcome();
+  }
+
   if (activeTab) {
     const d = keyToDate(activeTab); calYear = d.getFullYear(); calMonth = d.getMonth(); renderCalendar();
+  } else {
+    const now = new Date(); calYear = now.getFullYear(); calMonth = now.getMonth(); renderCalendar();
   }
 
   const yk = yesterdayKey();
@@ -3070,10 +3424,12 @@ async function initApp() {
     }
   } catch (_) {}
 
-  // Firebase auth listener: always registered so login from offline mode triggers immediately
+  // Firebase auth listener: sempre ativo para sincronizar assim que a sessão da conta resolver
   if (FB_ON && auth) {
     auth.onAuthStateChanged(async user => {
       currentUser = user || null;
+      if (isAuthInitializing) return;
+
       if (user) {
         localStorage.setItem(SK_MODE, 'online');
         hideAuthScreen();
@@ -3084,14 +3440,24 @@ async function initApp() {
             updateUserBar();
           }
         }).catch(err => console.warn('Avatar error:', err));
-        await initApp();
 
+        if (initializedForKey !== user.uid) {
+          initializedForKey = user.uid;
+          openTabs = []; activeTab = null;
+          await initApp();
+        }
       } else {
         const currentMode = localStorage.getItem(SK_MODE);
         if (currentMode === 'offline') {
           hideAuthScreen();
-          await initApp();
+          if (initializedForKey !== 'offline') {
+            initializedForKey = 'offline';
+            setSyncStatus('offline');
+            updateUserBar();
+            await initApp();
+          }
         } else {
+          initializedForKey = undefined;
           showAuthScreen();
         }
       }
@@ -3102,7 +3468,10 @@ async function initApp() {
     hideAuthScreen();
     setSyncStatus('offline');
     updateUserBar();
-    await initApp();
+    if (initializedForKey !== 'offline') {
+      initializedForKey = 'offline';
+      await initApp();
+    }
   } else {
     // Show auth screen immediately so all buttons and tabs are interactive right away
     if (!currentUser) {
