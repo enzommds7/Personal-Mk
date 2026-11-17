@@ -33,11 +33,11 @@
   --text-muted: #71717A;
 
   /* Cor de destaque única */
-  --brand: #7C83F5;
-  --brand-hover: #9399FF;
-  --brand-soft: rgba(124, 131, 245, 0.14);
+  --brand: #8B6CF7;
+  --brand-hover: #9D84FA;
+  --brand-soft: rgba(139, 108, 247, 0.16);
   --brand-contrast: #FFFFFF;
-  --border-focus: rgba(124, 131, 245, 0.55);
+  --border-focus: rgba(139, 108, 247, 0.55);
 
   /* Estados semânticos */
   --success: #4ADE80;
@@ -102,11 +102,11 @@
   --text-secondary: #5F5F68;
   --text-muted: #9A9AA3;
 
-  --brand: #4F56E0;
-  --brand-hover: #3F46C9;
-  --brand-soft: rgba(79, 86, 224, 0.1);
+  --brand: #7C5CF5;
+  --brand-hover: #6A48E8;
+  --brand-soft: rgba(124, 92, 245, 0.11);
   --brand-contrast: #FFFFFF;
-  --border-focus: rgba(79, 86, 224, 0.45);
+  --border-focus: rgba(124, 92, 245, 0.45);
 
   --success: #16A34A;
   --danger: #DC2626;
@@ -2855,17 +2855,10 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     text-align: center;
   }
 
-  .top-user-widget {
-    top: max(14px, calc(var(--sat) + 2px));
-    right: max(14px, var(--sar));
-    z-index: 1005;
-  }
-
   .mobile-header-actions {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding-right: 40px;
   }
 
   .mobile-icon-btn {
@@ -2889,10 +2882,6 @@ input[type="date"]::-webkit-calendar-picker-indicator {
   .mobile-icon-btn:active {
     background: var(--bg-card-hover);
     transform: scale(0.94);
-  }
-
-  #tabsBar {
-    display: none !important;
   }
 
   .mobile-close-sidebar-btn {

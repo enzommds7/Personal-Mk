@@ -55,16 +55,18 @@ function localKey() { return currentUser ? `${SK}_${currentUser.uid}` : SK; }
 function loadLocal() { try { return JSON.parse(localStorage.getItem(localKey())) || {}; } catch { return {}; } }
 function saveLocal(d) { localStorage.setItem(localKey(), JSON.stringify(d)); }
 function localGetDay(k) { return loadLocal()[k] || { content: '', updatedAt: null, tags: [], images: [], checklist: [] }; }
-function localSetDay(k, content, tags, images, checklist) {
+function localSetDay(k, content, tags, images, checklist, title) {
   const d = loadLocal();
   const existingImages = d[k] && Array.isArray(d[k].images) ? d[k].images : [];
   const existingChecklist = d[k] && Array.isArray(d[k].checklist) ? d[k].checklist : [];
+  const existingTitle = d[k] && typeof d[k].title === 'string' ? d[k].title : '';
   d[k] = { 
     content, 
     updatedAt: new Date().toISOString(), 
     tags: tags || [], 
     images: images !== undefined ? images : existingImages,
-    checklist: checklist !== undefined ? checklist : existingChecklist
+    checklist: checklist !== undefined ? checklist : existingChecklist,
+    title: typeof title === 'string' ? title : existingTitle
   };
   saveLocal(d);
 }
@@ -104,9 +106,18 @@ function isContentEmpty(html) {
 function hasRealContent(day) {
   if (!day) return false;
   return !isContentEmpty(day.content) ||
+    (typeof day.title === 'string' && day.title.trim().length > 0) ||
     (Array.isArray(day.tags) && day.tags.length > 0) ||
     (Array.isArray(day.checklist) && day.checklist.length > 0) ||
     (Array.isArray(day.images) && day.images.length > 0);
+}
+
+function dayDiffers(a, b) {
+  return (a.content || '') !== (b.content || '') ||
+    (a.title || '') !== (b.title || '') ||
+    JSON.stringify(a.tags || []) !== JSON.stringify(b.tags || []) ||
+    JSON.stringify(a.images || []) !== JSON.stringify(b.images || []) ||
+    JSON.stringify(a.checklist || []) !== JSON.stringify(b.checklist || []);
 }
 
 function migrateAnonymousToUserCache() {
@@ -127,6 +138,7 @@ function migrateAnonymousToUserCache() {
       tags: Array.isArray(anonDoc.tags) ? anonDoc.tags : [],
       images: Array.isArray(anonDoc.images) ? anonDoc.images : [],
       checklist: Array.isArray(anonDoc.checklist) ? anonDoc.checklist : [],
+      title: typeof anonDoc.title === 'string' ? anonDoc.title : '',
       updatedAt: anonDoc.updatedAt || null
     };
     if (mergeRemoteDay(key, targetDoc, userLocal)) {
@@ -170,10 +182,7 @@ function mergeRemoteDay(key, remoteDoc, localData) {
   const localTime = localDoc.updatedAt ? new Date(localDoc.updatedAt).getTime() : 0;
   
   if (remoteTime >= localTime || (!localTime && remoteTime)) {
-    if (localDoc.content !== remoteDoc.content ||
-        JSON.stringify(localDoc.tags || []) !== JSON.stringify(remoteDoc.tags || []) ||
-        JSON.stringify(localDoc.images || []) !== JSON.stringify(remoteDoc.images || []) ||
-        JSON.stringify(localDoc.checklist || []) !== JSON.stringify(remoteDoc.checklist || [])) {
+    if (dayDiffers(localDoc, remoteDoc)) {
       localData[key] = { ...localDoc, ...remoteDoc };
       return true;
     }
@@ -191,13 +200,14 @@ function applyRemoteEditorUpdate(local, activeTabChanged) {
   isApplyingRemoteChange = true;
   const day = local[activeTab];
   $('editor').innerHTML = day.content || '';
+  if ($('noteTitle') && document.activeElement !== $('noteTitle')) $('noteTitle').value = day.title || '';
   currentTags = day.tags ? [...day.tags] : [];
   renderTagsInEditor();
   currentChecklist = day.checklist ? [...day.checklist] : [];
   if (typeof renderChecklist === 'function') renderChecklist();
   if (typeof renderGallery === 'function') renderGallery();
   updateWC();
-  $('currentDaySubtitle').textContent = day.updatedAt ? `Última edição: ${new Date(day.updatedAt).toLocaleString('pt-BR')}` : 'Sincronizado';
+  $('currentDaySubtitle').textContent = day.updatedAt ? fmtEdited(day.updatedAt) : 'Sincronizado';
   isApplyingRemoteChange = false;
 }
 
@@ -237,6 +247,7 @@ function startRealtimeSync() {
         } else {
           const remote = {
             content: raw.content || '',
+            title: raw.title || '',
             tags: raw.tags || [],
             images: raw.images || [],
             checklist: raw.checklist || [],
@@ -297,6 +308,7 @@ async function checkAndSyncCloud() {
 
       const remote = {
         content: raw.content || '',
+        title: raw.title || '',
         tags: raw.tags || [],
         images: raw.images || [],
         checklist: raw.checklist || [],
@@ -323,10 +335,7 @@ async function checkAndSyncCloud() {
         if (localTime > (rem.time || 0)) shouldUpload = true;
       } else {
         const remoteTime = rem.updatedAt ? new Date(rem.updatedAt).getTime() : 0;
-        const differs = localDoc.content !== rem.content ||
-          JSON.stringify(localDoc.tags || []) !== JSON.stringify(rem.tags || []) ||
-          JSON.stringify(localDoc.images || []) !== JSON.stringify(rem.images || []) ||
-          JSON.stringify(localDoc.checklist || []) !== JSON.stringify(rem.checklist || []);
+        const differs = dayDiffers(localDoc, rem);
         if ((localTime > remoteTime || !remoteTime) && differs) {
           shouldUpload = true;
         }
@@ -336,6 +345,7 @@ async function checkAndSyncCloud() {
         uploadPromises.push(
           userDaysRef().doc(key).set({
             content: localDoc.content || '',
+            title: localDoc.title || '',
             tags: localDoc.tags || [],
             images: localDoc.images || [],
             checklist: localDoc.checklist || [],
@@ -370,6 +380,7 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
     setSyncStatus('syncing');
     await userDaysRef().doc(key).set({ 
       content: content || '', 
+      title: localGetDay(key).title || '',
       tags: tags || [], 
       images: images || [], 
       checklist: checklist || [], 
@@ -389,6 +400,7 @@ async function cloudDeleteDay(key) {
     await userDaysRef().doc(key).set({
       deleted: true,
       content: '',
+      title: '',
       tags: [],
       images: [],
       checklist: [],
@@ -411,8 +423,8 @@ async function cloudLoadAll() {
 
 /* ────── Combined get/set (local + cloud) ────── */
 async function getDay(k) { return localGetDay(k); }
-async function setDay(k, content, tags, images, checklist) {
-  localSetDay(k, content, tags, images, checklist);
+async function setDay(k, content, tags, images, checklist, title) {
+  localSetDay(k, content, tags, images, checklist, title);
   if (currentUser) cloudSaveDay(k, content, tags, images, checklist);
 }
 async function delDay(k) {
@@ -437,7 +449,11 @@ function updateThemeBtn() {
   const darkSvg = '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
   const iconHtml = isL ? lightSvg : darkSvg;
 
-  if ($('themeToggleBtn')) $('themeToggleBtn').innerHTML = iconHtml;
+  const tBtn = $('themeToggleBtn');
+  if (tBtn) {
+    const smallIcon = (isL ? darkSvg : lightSvg).replace(/width="18" height="18"/, 'width="14" height="14"');
+    tBtn.innerHTML = `${smallIcon}<span>${isL ? 'Tema escuro' : 'Tema claro'}</span>`;
+  }
   if ($('mobileThemeBtn')) $('mobileThemeBtn').innerHTML = iconHtml;
   if ($('authThemeToggleBtn')) $('authThemeToggleBtn').innerHTML = iconHtml;
 
@@ -476,9 +492,8 @@ function getTagColors(tag) {
 }
 
 function renderTagChip(name, withDel) {
-  const c = getTagColors(name);
-  const del = withDel ? `<button class="tag-chip-del" data-tag="${esc(name)}" title="Remover" style="color:inherit;">&#x00D7;</button>` : '';
-  return `<span class="tag-chip" style="background:${c.bg}; color:${c.text}; border-color:${c.border};">#${esc(name)}${del}</span>`;
+  const del = withDel ? `<button class="tag-chip-del" data-tag="${esc(name)}" title="Remover">&#x00D7;</button>` : '';
+  return `<span class="tag-chip">#${esc(name)}${del}</span>`;
 }
 
 /* ────── Toast ────── */
@@ -754,6 +769,7 @@ function toggleUserPopover() {
   const bar = $('userBar');
   const trigger = $('userAvatar');
   if (!bar) return;
+  if (typeof closeAllDropdowns === 'function') closeAllDropdowns();
   const isOpen = bar.style.display === 'flex';
   bar.style.display = isOpen ? 'none' : 'flex';
   if (trigger) trigger.setAttribute('aria-expanded', String(!isOpen));
@@ -1005,12 +1021,14 @@ function fuzzySearchNotes(query, activeTag) {
 
     const dateMatch = fuzzyMatch(fullDate, cleanQ) || fuzzyMatch(shortDate, cleanQ) || fuzzyMatch(k, cleanQ);
     const tagMatch = tags.some(t => fuzzyMatch(t, cleanQ));
+    const titleMatch = !!day.title && fuzzyMatch(day.title, cleanQ);
     const contentMatch = fuzzyMatch(content, cleanQ);
     const checkMatch = fuzzyMatch(checklistTexts, cleanQ);
 
-    if (dateMatch || tagMatch || contentMatch || checkMatch) {
+    if (dateMatch || tagMatch || titleMatch || contentMatch || checkMatch) {
       let score = 1;
       if (dateMatch) score += 3;
+      if (titleMatch) score += 3;
       if (tagMatch) score += 2;
       if (contentMatch) score += 1;
 
@@ -1038,18 +1056,13 @@ function renderTagFilterBar() {
   const bar = $('tagFilterBar');
   if (!all.size) { bar.innerHTML = ''; return; }
 
-  let html = [...all].map(t => {
-    const c = getTagColors(t);
-    const isAct = activeTagFilter === t;
-    const ac = isAct ? ' active' : '';
-    const style = isAct
-      ? `background:${c.text}; color:#ffffff; border-color:${c.text};`
-      : `background:${c.bg}; color:${c.text}; border-color:${c.border};`;
-    return `<span class="tag-filter-chip${ac}" data-tag="${esc(t)}" style="${style}">#${esc(t)}</span>`;
+  let html = [...all].sort((a, b) => a.localeCompare(b)).map(t => {
+    const ac = activeTagFilter === t ? ' active' : '';
+    return `<button type="button" class="tag-filter-chip${ac}" data-tag="${esc(t)}">#${esc(t)}</button>`;
   }).join('');
 
   if (activeTagFilter) {
-    html += `<span class="tag-filter-clear" id="tagFilterClearBtn" title="Limpar filtro de tag">&#x00D7; Limpar</span>`;
+    html += `<button type="button" class="tag-filter-clear" id="tagFilterClearBtn" title="Limpar filtro de tag">&#x00D7; Limpar</button>`;
   }
 
   bar.innerHTML = html;
@@ -1059,6 +1072,7 @@ function renderTagFilterBar() {
       activeTagFilter = activeTagFilter === el.dataset.tag ? null : el.dataset.tag;
       renderTagFilterBar();
       renderSidebar($('searchInput').value);
+      if (activeTagFilter) setSidebarView('all');
     });
   });
 
@@ -1103,10 +1117,9 @@ function renderSidebar(filter) {
     const hc = (c.trim().length || (d.images && d.images.length) || (d.checklist && d.checklist.length)) ? ' has-content' : '';
 
     const dayTags = Array.isArray(d.tags) ? d.tags : [];
-    const chips = dayTags.slice(0, 2).map(t => {
-      const col = getTagColors(t);
-      return `<span class="day-tag-chip" data-tag="${esc(t)}" style="background:${col.bg}; color:${col.text}; border-color:${col.border};">#${esc(t)}</span>`;
-    }).join('');
+    const chips = dayTags.slice(0, 2).map(t => `<span class="day-tag-chip" data-tag="${esc(t)}">#${esc(t)}</span>`).join('');
+    const titleText = (d.title || '').trim();
+    if (titleText) preview = titleText;
 
     let metaIcon = '';
     if (d.checklist && d.checklist.length > 0) {
@@ -1607,6 +1620,7 @@ function openSidebar() {
 function closeSidebar() {
   $('sidebar').classList.remove('open');
   $('sidebarBackdrop').classList.remove('show');
+  $('bnNotes')?.classList.remove('active');
   if (window.innerWidth <= 768 && location.hash === '#menu') {
     try { history.back(); } catch (_) {}
   }
@@ -1664,25 +1678,55 @@ $('sidebarBackdrop').addEventListener('click', closeSidebar);
 $('daysList').addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); });
 $('newDayBtn').addEventListener('click', () => { if (window.innerWidth <= 768) closeSidebar(); pickDateModal(); });
 
-// Calendário Accordion na Sidebar
-function toggleCalAccordion() {
-  const acc = $('calAccordion');
-  if (!acc) return;
-  acc.classList.toggle('collapsed');
-  try {
-    localStorage.setItem('personalmk_cal_collapsed', acc.classList.contains('collapsed') ? '1' : '0');
-  } catch (_) {}
-}
-$('calAccordionHeader')?.addEventListener('click', toggleCalAccordion);
-$('calAccordionHeader')?.addEventListener('keydown', e => {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    toggleCalAccordion();
-  }
-});
+// Calendário: sempre visível no layout minimalista (antigo accordion removido)
 $('searchKbdBadge')?.addEventListener('click', () => {
   openQuickSearch();
 });
+
+/* ────── Navegação da sidebar (Hoje / Todas as anotações) ────── */
+const SK_SIDEBAR_VIEW = 'personalmk_sidebar_view';
+let sidebarView = 'home';
+try { if (localStorage.getItem(SK_SIDEBAR_VIEW) === 'all') sidebarView = 'all'; } catch (_) {}
+
+function setSidebarView(view) {
+  sidebarView = view === 'all' ? 'all' : 'home';
+  try { localStorage.setItem(SK_SIDEBAR_VIEW, sidebarView); } catch (_) {}
+  updateNavState();
+}
+
+function updateNavState() {
+  const body = $('sidebarBody');
+  if (body) body.dataset.view = sidebarView;
+  $('navHomeBtn')?.classList.toggle('active', sidebarView === 'home');
+  $('navAllBtn')?.classList.toggle('active', sidebarView === 'all');
+  $('bnToday')?.classList.toggle('active', !!activeTab && activeTab === todayKey());
+  $('bnNotes')?.classList.toggle('active', $('sidebar')?.classList.contains('open') && sidebarView === 'all');
+}
+
+$('navHomeBtn')?.addEventListener('click', () => {
+  setSidebarView('home');
+  if ($('searchInput').value) { $('searchInput').value = ''; renderSidebar(''); }
+  createOrOpen(todayKey());
+  if (window.innerWidth <= 768) closeSidebar();
+});
+$('navAllBtn')?.addEventListener('click', () => setSidebarView('all'));
+
+function fmtEdited(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) return `Editado hoje às ${time}`;
+  return `Editado em ${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${time}`;
+}
+
+function fmtEyebrow(k) {
+  const d = keyToDate(k);
+  const wd = d.toLocaleDateString('pt-BR', { weekday: 'long' });
+  const mon = d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+  return `${wd} · ${d.getDate()} ${mon} ${d.getFullYear()}`;
+}
 
 /* ────── Tabs ────── */
 let openTabs = [], activeTab = null;
@@ -1725,6 +1769,7 @@ function activateTab(key) {
   calView = 'days';
   saveTabState();
   renderTabs(); renderSidebar($('searchInput').value); renderCalendar(); showEditor(key);
+  updateNavState();
 }
 function closeTab(key) {
   openTabs = openTabs.filter(k => k !== key);
@@ -1734,10 +1779,13 @@ function closeTab(key) {
   if (activeTab) { renderSidebar($('searchInput').value); showEditor(activeTab); }
   else { showWelcome(); renderSidebar($('searchInput').value); }
   renderCalendar();
+  updateNavState();
 }
 function showWelcome() { 
   $('welcome').style.display = 'flex'; 
   $('editorPane').style.display = 'none'; 
+  document.body.classList.add('no-note');
+  hideFloatingToolbar();
   if ($('mobileHeaderTitle')) $('mobileHeaderTitle').textContent = 'PersonalMk';
 }
 
@@ -1746,14 +1794,16 @@ let currentChecklist = [];
 
 function showEditor(key) {
   $('welcome').style.display = 'none'; $('editorPane').style.display = 'flex';
+  document.body.classList.remove('no-note');
+  hideFloatingToolbar();
   const day = localGetDay(key);
   $('editor').innerHTML = day.content || '';
-  const title = fmtFull(key);
-  $('currentDayTitle').textContent = title;
+  $('currentDayTitle').textContent = fmtEyebrow(key);
+  $('currentDayTitle').title = fmtFull(key);
+  if ($('noteTitle')) $('noteTitle').value = day.title || '';
   if ($('mobileHeaderTitle')) $('mobileHeaderTitle').textContent = 'PersonalMk';
   checkTimeCapsule(key);
-  const upd = day.updatedAt ? new Date(day.updatedAt).toLocaleString('pt-BR') : null;
-  $('currentDaySubtitle').textContent = upd ? `Última edição: ${upd}` : 'Novo registro';
+  $('currentDaySubtitle').textContent = day.updatedAt ? fmtEdited(day.updatedAt) : 'Nova anotação';
   currentTags = [...(day.tags || [])];
   currentChecklist = [...(day.checklist || [])];
   renderTagsInEditor();
@@ -1765,7 +1815,8 @@ function showEditor(key) {
   }
   setSave('saved'); updateWC();
   if (window.innerWidth > 768) {
-    $('editor').focus();
+    if (!day.title && isContentEmpty(day.content) && $('noteTitle')) $('noteTitle').focus();
+    else $('editor').focus();
   }
 }
 function setSave(s) {
@@ -1789,13 +1840,42 @@ function updateWC() {
 async function saveCurrent() {
   if (!activeTab || isApplyingRemoteChange) return;
   const day = localGetDay(activeTab); 
-  await setDay(activeTab, $('editor').innerHTML, currentTags, day.images, currentChecklist);
+  const titleVal = $('noteTitle') ? $('noteTitle').value.trim() : undefined;
+  await setDay(activeTab, $('editor').innerHTML, currentTags, day.images, currentChecklist, titleVal);
   setSave('saved'); renderSidebar($('searchInput').value); renderTagFilterBar(); renderCalendar();
-  $('currentDaySubtitle').textContent = `Última edição: ${new Date().toLocaleString('pt-BR')}`;
+  $('currentDaySubtitle').textContent = fmtEdited(new Date().toISOString());
 }
 const doSave = debounce(saveCurrent, 700);
 window.addEventListener('beforeunload', () => {
   if (activeTab && !isApplyingRemoteChange) saveCurrent();
+});
+
+/* Título da anotação: Enter pula para o editor */
+$('noteTitle')?.addEventListener('input', () => { setSave('saving'); doSave(); });
+$('noteTitle')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || (e.key === 'ArrowDown' && !e.shiftKey)) {
+    e.preventDefault();
+    const ed = $('editor');
+    ed.focus();
+    const r = document.createRange();
+    r.selectNodeContents(ed);
+    r.collapse(true);
+    const s = window.getSelection();
+    s.removeAllRanges(); s.addRange(r);
+  }
+});
+
+/* Clicar no espaço vazio abaixo do texto foca o editor no final */
+$('editorWrap')?.addEventListener('mousedown', e => {
+  if (e.target !== $('editorWrap')) return;
+  e.preventDefault();
+  const ed = $('editor');
+  ed.focus();
+  const r = document.createRange();
+  r.selectNodeContents(ed);
+  r.collapse(false);
+  const s = window.getSelection();
+  s.removeAllRanges(); s.addRange(r);
 });
 
 function fmtCalcNum(n) {
@@ -2242,7 +2322,11 @@ $('restoreFileInput').addEventListener('change', e => {
 });
 
 /* ────── Search ────── */
-$('searchInput').addEventListener('input', () => renderSidebar($('searchInput').value));
+$('searchInput').addEventListener('input', () => {
+  const v = $('searchInput').value;
+  if (v.trim() && sidebarView !== 'all') setSidebarView('all');
+  renderSidebar(v);
+});
 
 /* ────── Theme toggle ────── */
 $('themeToggleBtn').addEventListener('click', toggleTheme);
@@ -2390,13 +2474,16 @@ async function compressImage(file, maxDim = 1600, quality = 0.7) {
   });
 }
 
-/* ────── UI Tabs ────── */
+/* ────── UI Tabs (Texto / Tarefas / Galeria) ────── */
+const VIEW_LABELS = { text: 'Texto', checklist: 'Tarefas', gallery: 'Galeria' };
 function switchInnerTab(tab) {
   $('tabText').classList.toggle('active', tab === 'text');
   $('tabChecklist').classList.toggle('active', tab === 'checklist');
   $('tabGallery').classList.toggle('active', tab === 'gallery');
+  if ($('viewSwitchLabel')) $('viewSwitchLabel').textContent = VIEW_LABELS[tab] || 'Texto';
+  closeAllDropdowns();
+  hideFloatingToolbar();
 
-  $('toolbar').style.display = tab === 'text' ? 'flex' : 'none';
   $('editorWrap').style.display = tab === 'text' ? 'block' : 'none';
   $('wordCount').style.display = tab === 'text' ? 'flex' : 'none';
   
@@ -2407,6 +2494,142 @@ function switchInnerTab(tab) {
   if (tab === 'gallery') renderGallery();
   if (tab === 'checklist') renderChecklist();
 }
+
+/* ────── Menus suspensos genéricos ────── */
+const DROPDOWNS = [
+  ['noteMenuBtn', 'noteMenu'],
+  ['sidebarMoreBtn', 'sidebarMoreMenu'],
+  ['viewSwitchBtn', 'viewMenu'],
+];
+function closeAllDropdowns(except) {
+  DROPDOWNS.forEach(([b, m]) => {
+    if (m === except) return;
+    const menu = $(m);
+    if (menu) menu.hidden = true;
+    $(b)?.setAttribute('aria-expanded', 'false');
+  });
+}
+DROPDOWNS.forEach(([btnId, menuId]) => {
+  const btn = $(btnId), menu = $(menuId);
+  if (!btn || !menu) return;
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const willOpen = menu.hidden;
+    closeAllDropdowns(menuId);
+    if (typeof closeUserPopover === 'function') closeUserPopover();
+    menu.hidden = !willOpen;
+    btn.setAttribute('aria-expanded', String(willOpen));
+  });
+  menu.addEventListener('click', e => {
+    if (e.target.closest('.dropdown-item')) menu.hidden = true;
+  });
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('.more-wrap')) closeAllDropdowns();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeAllDropdowns(); hideFloatingToolbar(); } });
+
+$('noteMenuMusicBtn')?.addEventListener('click', () => openSpotifyModal());
+
+/* ────── Barra de formatação flutuante (aparece ao selecionar texto) ────── */
+function hideFloatingToolbar() {
+  const tb = $('toolbar');
+  if (tb) tb.classList.remove('visible');
+}
+function positionFloatingToolbar() {
+  const tb = $('toolbar');
+  const ed = $('editor');
+  if (!tb || !ed) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed || !ed.contains(sel.anchorNode) || !ed.contains(sel.focusNode)) {
+    hideFloatingToolbar();
+    return;
+  }
+  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0)) { hideFloatingToolbar(); return; }
+  tb.classList.add('visible');
+  const tbW = tb.offsetWidth, tbH = tb.offsetHeight;
+  const isMobile = window.innerWidth <= 768;
+  let left = rect.left + rect.width / 2 - tbW / 2;
+  left = Math.max(8, Math.min(left, window.innerWidth - tbW - 8));
+  // No celular fica abaixo da seleção (o menu nativo do sistema aparece acima)
+  let top = isMobile ? rect.bottom + 10 : rect.top - tbH - 8;
+  if (!isMobile && top < 8) top = rect.bottom + 8;
+  if (isMobile && top + tbH > window.innerHeight - 8) top = rect.top - tbH - 10;
+  tb.style.left = `${Math.round(left)}px`;
+  tb.style.top = `${Math.round(top)}px`;
+}
+let floatTbRaf = 0;
+document.addEventListener('selectionchange', () => {
+  cancelAnimationFrame(floatTbRaf);
+  floatTbRaf = requestAnimationFrame(positionFloatingToolbar);
+});
+$('toolbar')?.addEventListener('mousedown', e => e.preventDefault()); // mantém a seleção ao clicar nos botões
+$('noteScroll')?.addEventListener('scroll', () => {
+  if ($('toolbar')?.classList.contains('visible')) positionFloatingToolbar();
+}, { passive: true });
+window.addEventListener('resize', hideFloatingToolbar);
+
+/* ────── Atalhos Markdown no editor ( "# ", "## ", "- ", "1. ", "> ", "[] " ) ────── */
+function getCurrentBlock(node) {
+  const ed = $('editor');
+  let n = node;
+  while (n && n !== ed && n.parentNode !== ed) n = n.parentNode;
+  return n && n !== ed ? n : null;
+}
+$('editor').addEventListener('input', e => {
+  if (!e || e.inputType !== 'insertText' || e.data !== ' ') return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+  const node = sel.focusNode;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return;
+  const before = node.textContent.slice(0, sel.focusOffset).replace(/\u00A0/g, ' ');
+  const block = getCurrentBlock(node);
+  // Só dispara no início do bloco (o texto antes do cursor no bloco é só o marcador)
+  if (block && block.nodeType === Node.ELEMENT_NODE) {
+    const blockText = (block.textContent || '').replace(/\u00A0/g, ' ');
+    if (!blockText.startsWith(before)) return;
+  }
+  const map = { '# ': ['formatBlock', 'h1'], '## ': ['formatBlock', 'h2'], '### ': ['formatBlock', 'h3'], '- ': ['insertUnorderedList'], '* ': ['insertUnorderedList'], '1. ': ['insertOrderedList'], '> ': ['formatBlock', 'blockquote'] };
+  const action = map[before];
+  if (!action) return;
+  const r = document.createRange();
+  r.setStart(node, 0);
+  r.setEnd(node, sel.focusOffset);
+  r.deleteContents();
+  document.execCommand(action[0], false, action[1] || null);
+  setSave('saving'); doSave();
+});
+
+/* ────── Celular: avatar no cabeçalho, barra inferior e botão flutuante ────── */
+const mqMobile = window.matchMedia('(max-width: 768px)');
+function placeUserWidget() {
+  const widget = $('topUserWidget');
+  if (!widget) return;
+  const target = mqMobile.matches ? $('mobileHeaderActions') : $('topbarActions');
+  if (!target || widget.parentNode === target) return;
+  if (mqMobile.matches) target.appendChild(widget);
+  else target.insertBefore(widget, target.querySelector('.note-more'));
+}
+placeUserWidget();
+if (mqMobile.addEventListener) mqMobile.addEventListener('change', placeUserWidget);
+else if (mqMobile.addListener) mqMobile.addListener(placeUserWidget);
+
+$('bnToday')?.addEventListener('click', () => { closeSidebar(); createOrOpen(todayKey()); });
+$('bnNotes')?.addEventListener('click', () => { setSidebarView('all'); openSidebar(); updateNavState(); });
+$('bnSearch')?.addEventListener('click', () => { closeSidebar(); openQuickSearch(); });
+$('mobileFab')?.addEventListener('click', () => { closeSidebar(); pickDateModal(); });
+
+// Esconde a barra inferior enquanto o usuário digita (teclado aberto)
+document.addEventListener('focusin', e => {
+  if (e.target.matches('#editor, #editor *, input, textarea')) document.body.classList.add('is-typing');
+});
+document.addEventListener('focusout', () => {
+  setTimeout(() => {
+    const a = document.activeElement;
+    if (!a || !a.matches('#editor, #editor *, input, textarea')) document.body.classList.remove('is-typing');
+  }, 50);
+});
 
 $('tabText').addEventListener('click', () => switchInnerTab('text'));
 $('tabChecklist').addEventListener('click', () => switchInnerTab('checklist'));
@@ -3418,11 +3641,7 @@ async function initApp() {
   try { await initIDB(); } catch (e) { console.warn('IDB init warning:', e); }
 
   const mode = localStorage.getItem(SK_MODE);
-  try {
-    if (localStorage.getItem('personalmk_cal_collapsed') === '1') {
-      $('calAccordion')?.classList.add('collapsed');
-    }
-  } catch (_) {}
+  updateNavState();
 
   // Firebase auth listener: sempre ativo para sincronizar assim que a sessão da conta resolver
   if (FB_ON && auth) {

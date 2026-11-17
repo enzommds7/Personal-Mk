@@ -37,7 +37,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
-  <link rel="stylesheet" href="style.css?v=2.5" />
+  <link rel="stylesheet" href="style.css?v=3.0" />
 </head>
 
 <body>
@@ -139,161 +139,103 @@
     <div id="sidebarBackdrop"></div>
 
     <aside id="sidebar">
-      
       <div class="sidebar-workspace sidebar-top">
         <div class="logo-row">
-          <div class="logo">
-            <div class="logo-text">
-              <h1>PersonalMk</h1><span>Seu lugar.</span>
-            </div>
-          </div>
+          <div class="logo"><div class="logo-text"><h1>PersonalMk</h1></div></div>
           <div class="logo-actions">
-            <button class="icon-pill mobile-close-sidebar-btn" id="mobileCloseSidebarBtn" title="Fechar menu">✕</button>
-            <button class="icon-pill" id="collapseSidebarBtn" title="Ocultar painel lateral">
-              <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-            </button>
+            <button class="icon-ghost mobile-close-sidebar-btn" id="mobileCloseSidebarBtn" type="button" title="Fechar menu">✕</button>
+            <button class="icon-ghost" id="collapseSidebarBtn" type="button" title="Ocultar painel lateral"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
           </div>
         </div>
 
-        <!-- Botão Principal em Destaque: Nova Anotação -->
+        <div class="search-wrap">
+          <svg class="search-icon" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input id="searchInput" type="text" placeholder="Buscar anotações" autocomplete="off" title="Busca instantânea (aceita #tag)" />
+          <kbd class="search-kbd" id="searchKbdBadge" title="Busca rápida (Ctrl+K)">Ctrl K</kbd>
+        </div>
+
         <button class="new-day-btn new-day-primary-btn" id="newDayBtn" type="button" title="Criar nova anotação (Alt+N)">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          <span class="new-day-btn-label">Nova Anotação</span>
-          <kbd class="new-day-kbd">Alt+N</kbd>
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="new-day-btn-label">Nova anotação</span>
         </button>
 
-       
-        <div class="search-wrap">
-          <svg class="search-icon" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
-          <input id="searchInput" type="text" placeholder="Buscar (Ctrl+K) ou #tag..." autocomplete="off" title="Busca instantânea com tolerância a erros (Ctrl+K)" />
-          <kbd class="search-kbd" id="searchKbdBadge" title="Atalho Ctrl+K">Ctrl+K</kbd>
+        <nav class="side-nav" aria-label="Navegação">
+          <button class="side-nav-item" id="navHomeBtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span>Hoje</span></button>
+          <button class="side-nav-item" id="navAllBtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span>Todas as anotações</span><span class="notes-count-badge" id="notesCountBadge"></span></button>
+        </nav>
+      </div>
+
+      <div class="sidebar-organization" id="sidebarBody" data-view="home">
+        <div class="side-section side-tags" id="tagsSection">
+          <div class="side-section-label">Tags</div>
+          <div id="tagFilterBar"></div>
+        </div>
+
+        <div class="side-section side-home">
+          <div class="sidebar-accordion cal-accordion" id="calAccordion">
+            <div class="cal-wrap" id="calWrap">
+              <div class="cal-header">
+                <button class="cal-nav" id="calPrev" type="button" title="Anterior">&#x2039;</button>
+                <button class="cal-month-label" id="calMonthLabel" type="button" title="Mudar visualização (mês / ano)">
+                  <span id="calMonthLabelText"></span>
+                </button>
+                <button class="cal-nav" id="calNext" type="button" title="Próximo">&#x203A;</button>
+              </div>
+              <div class="cal-grid" id="calGrid"></div>
+              <div class="cal-footer" id="calTodayBtn" title="Ir para a anotação de hoje"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="side-section side-all">
+          <div class="notes-header-row">
+            <div class="side-section-label" id="notesSectionLabel">Anotações</div>
+          </div>
+          <div id="daysList"></div>
         </div>
       </div>
 
-      
-      <div class="sidebar-organization">
-        <div id="tagFilterBar"></div>
-
-        
-        <div class="sidebar-accordion cal-accordion" id="calAccordion">
-          <div class="accordion-header" id="calAccordionHeader" role="button" tabindex="0" title="Recolher / Expandir calendário">
-            <div class="accordion-title">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-                <line x1="16" y1="2" x2="16" y2="6"/>
-                <line x1="8" y1="2" x2="8" y2="6"/>
-                <line x1="3" y1="10" x2="18" y2="10"/>
-              </svg>
-              <span>Calendário</span>
-            </div>
-            <div class="accordion-chevron">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </div>
-          </div>
-          <div class="cal-wrap" id="calWrap">
-            <div class="cal-header">
-              <button class="cal-nav" id="calPrev" title="Anterior">&#x2039;</button>
-              <button class="cal-month-label" id="calMonthLabel" type="button" title="Mudar visualização (mês / ano)">
-                <span id="calMonthLabelText"></span>
-                <svg class="cal-view-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="6 9 12 15 18 9"></polyline>
-                </svg>
-              </button>
-              <button class="cal-nav" id="calNext" title="Próximo">&#x203A;</button>
-            </div>
-            <div class="cal-grid" id="calGrid"></div>
-            <div class="cal-footer" id="calTodayBtn" title="Ir para a anotação de hoje"></div>
-          </div>
-        </div>
-            <!-- Lista de Anotações -->
-        <div class="notes-header-row">
-          <div class="section-label" id="notesSectionLabel">Anotações</div>
-          <span class="notes-count-badge" id="notesCountBadge"></span>
-        </div>
-        <div id="daysList"></div>
-      </div>
-
-      <!-- ── BLOCO 3: PREFERÊNCIAS & SISTEMA ── -->
       <div class="sidebar-preferences-footer sidebar-footer">
-        <div class="sync-row">
-          <div class="sync-bar" id="syncBar" title="Status de sincronização em nuvem">
-            <div class="sync-dot"></div>
-            <span id="syncText">Modo local</span>
-          </div>
-          <button class="footer-btn glass-btn theme-toggle-btn" id="themeToggleBtn" type="button" title="Alternar tema (Claro / Escuro)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-            </svg>
-          </button>
+        <div class="sync-bar" id="syncBar" title="Status de sincronização (clique para sincronizar)">
+          <div class="sync-dot"></div>
+          <span id="syncText">Modo local</span>
         </div>
-        <div class="pref-actions-row">
-          <button class="footer-btn glass-btn pref-icon-btn" id="settingsBtn" type="button" title="Configurações">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-            <span>Ajustes</span>
-          </button>
-          <button class="footer-btn glass-btn pref-data-btn" id="backupBtn" type="button" title="Fazer backup dos dados locais">
-            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            <span>Backup</span>
-          </button>
-          <button class="footer-btn glass-btn pref-data-btn" id="restoreBtn" type="button" title="Restaurar backup">
-            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-              <path d="M21 3v5h-5" />
-              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-            </svg>
-            <span>Restaurar</span>
-          </button>
-          <input type="file" id="restoreFileInput" accept=".json" style="display:none" />
+        <div class="footer-row">
+          <button class="footer-link" id="settingsBtn" type="button" title="Configurações"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>Ajustes</span></button>
+          <div class="more-wrap">
+            <button class="icon-ghost" id="sidebarMoreBtn" type="button" title="Mais opções" aria-haspopup="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button>
+            <div class="dropdown-menu drop-up" id="sidebarMoreMenu" hidden>
+              <button class="dropdown-item" id="themeToggleBtn" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg><span>Alternar tema</span></button>
+              <div class="dropdown-divider"></div>
+              <button class="dropdown-item" id="backupBtn" type="button"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Fazer backup</span></button>
+              <button class="dropdown-item" id="restoreBtn" type="button"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/></svg><span>Restaurar backup</span></button>
+            </div>
+            <input type="file" id="restoreFileInput" accept=".json" style="display:none" />
+          </div>
         </div>
       </div>
     </aside>
 
     <main id="main">
-      
       <header id="mobileHeader" class="mobile-header">
-        <button id="mobileMenuBtn" class="mobile-menu-btn" title="Abrir menu lateral" type="button">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-          <span>Menu</span>
-        </button>
+        <button id="mobileMenuBtn" class="mobile-menu-btn" title="Abrir menu" type="button"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button>
         <div class="mobile-header-center">
           <span class="mobile-header-title" id="mobileHeaderTitle">PersonalMk</span>
           <div class="mobile-sync-badge offline" id="mobileSyncIndicator" title="Status de sincronização"></div>
         </div>
-        <div class="mobile-header-actions">
-          <button id="mobileThemeBtn" class="mobile-icon-btn" title="Alternar tema" type="button">
-            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-          </button>
-          <button id="mobileNewDayBtn" class="mobile-icon-btn" title="Nova anotação" type="button">
-            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-          </button>
-          <button id="mobileSettingsBtn" class="mobile-icon-btn" title="Configurações" type="button">
-            <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>
-        </div>
+        <div class="mobile-header-actions" id="mobileHeaderActions"></div>
       </header>
 
-      <!-- Avatar no canto superior direito + Popover de Conta -->
-      <div class="top-user-widget" id="topUserWidget">
+      <div id="topbar">
+        <div id="tabsBar">
+          <button id="hamburgerBtn" type="button" title="Mostrar painel lateral"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg></button>
+        </div>
+        <div class="topbar-actions" id="topbarActions">
+          <div id="saveStatus" class="save-status-badge" title="Salvamento automático">
+            <svg id="saveStatusIcon" class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span id="saveStatusText">Salvo</span>
+          </div>
+          <button class="icon-ghost spotify-quick-btn" id="spotifyQuickBtn" type="button" title="Música do dia"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></button>
+          <div class="top-user-widget" id="topUserWidget">
         <button class="user-avatar-trigger" id="userAvatar" type="button" title="Conta e perfil" aria-haspopup="true" aria-expanded="false">?</button>
         <div class="user-popover" id="userBar" style="display:none;">
           <div class="user-popover-header">
@@ -338,36 +280,27 @@
           </div>
         </div>
       </div>
-
-      <div id="tabsBar">
-        <button id="hamburgerBtn" title="Menu">
-          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-        </button>
+          <div class="more-wrap note-more">
+            <button class="icon-ghost" id="noteMenuBtn" type="button" title="Mais opções" aria-haspopup="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button>
+            <div class="dropdown-menu" id="noteMenu" hidden>
+              <button class="dropdown-item mobile-only" id="noteMenuMusicBtn" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg><span>Música do dia</span></button>
+              <button class="dropdown-item" id="exportBtn" type="button"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Exportar anotação</span></button>
+              <div class="dropdown-divider"></div>
+              <button class="dropdown-item danger" id="deleteCurrentBtn" type="button"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg><span>Excluir anotação</span></button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="welcome">
-        <div class="welcome-icon"><svg width="64" height="64" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
-          <rect width="512" height="512" rx="120" fill="var(--bg-surface-glass)"/>
-          <path d="M168 160 L168 352" stroke="var(--text-primary)" stroke-width="28" stroke-linecap="round"/>
-          <path d="M168 160 L280 160 C316 160 340 182 340 216 C340 250 316 272 280 272 L168 272" stroke="var(--text-primary)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-        </svg></div>
         <h2>Bem-vindo ao PersonalMk</h2>
-        <p>Suas anotações sincronizadas em todos os dispositivos.</p>
-        <button class="welcome-cta" id="welcomeBtn">
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Abrir anotação de hoje
-        </button>
+        <p>Suas anotações, tarefas e lembranças em um só lugar.</p>
+        <button class="welcome-cta" id="welcomeBtn" type="button"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> Abrir anotação de hoje</button>
       </div>
 
       <div id="editorPane" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
-        <!-- CÁPSULA DO TEMPO (Recordações do Passado) -->
-        <div class="time-capsule-banner" id="timeCapsuleBanner" style="display:none;">
+        <div id="noteScroll">
+          <div class="time-capsule-banner" id="timeCapsuleBanner" style="display:none;">
           <div class="time-capsule-icon">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10" />
@@ -384,76 +317,30 @@
           </div>
         </div>
 
-        <div id="editorHeader">
-          
-          <div class="editor-header-top-bar">
-            
-            <div class="editor-inner-tabs segmented-control">
-              <button class="inner-tab active" id="tabText" type="button" title="Editor de Texto">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                <span>Texto</span>
-              </button>
-              <button class="inner-tab" id="tabChecklist" type="button" title="Lista de Tarefas">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-                <span>Tarefas</span>
-              </button>
-              <button class="inner-tab" id="tabGallery" type="button" title="Galeria de Imagens">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                <span>Galeria</span>
-              </button>
-            </div>
-
-           
-            <div class="editor-actions">
-              <div id="saveStatus" class="save-status-badge" title="Status de salvamento automático">
-                <svg id="saveStatusIcon" class="status-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-                <span id="saveStatusText">Salvo</span>
-              </div>
-              <button class="icon-btn spotify-quick-btn" id="spotifyQuickBtn" type="button" title="Música do dia">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
-                </svg>
-                <span>Música</span>
-              </button>
-              <button class="icon-btn glass-btn" id="exportBtn" type="button" title="Exportar anotação (Markdown / Texto)">
-                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                <span>Exportar</span>
-              </button>
-              <button class="icon-btn danger" id="deleteCurrentBtn" type="button" title="Excluir anotação">
-                <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                  <polyline points="3 6 5 6 21 6" />
-                  <path d="M19 6l-1 14H6L5 6" />
-                  <path d="M10 11v6M14 11v6" />
-                  <path d="M9 6V4h6v2" />
-                </svg>
-                <span>Excluir</span>
-              </button>
-            </div>
-          </div>
-
-         
-          <div class="editor-header-main">
-            <h1 class="editor-title" id="currentDayTitle">-</h1>
-            <div class="editor-meta-bar">
-              <span class="editor-meta-sub" id="currentDaySubtitle">-</span>
-              <span class="editor-meta-sep">•</span>
-              <div class="tag-row">
-                <div class="tag-input-wrap" id="tagInputWrap" title="Clique para adicionar tags">
-                  <span id="tagsContainer"></span>
-                  <input id="tagInput" type="text" placeholder="+ tag..." autocomplete="off" />
+          <div id="editorHeader">
+            <div class="note-eyebrow" id="currentDayTitle">-</div>
+            <input id="noteTitle" class="note-title" type="text" placeholder="Sem título" autocomplete="off" maxlength="140" aria-label="Título da anotação" />
+            <div class="note-meta">
+              <div class="more-wrap">
+                <button class="meta-btn" id="viewSwitchBtn" type="button" title="Alternar entre texto, tarefas e galeria" aria-haspopup="true">
+                  <span id="viewSwitchLabel">Texto</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="dropdown-menu" id="viewMenu" hidden>
+                  <button class="dropdown-item view-option active" id="tabText" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>Texto</span></button>
+                  <button class="dropdown-item view-option" id="tabChecklist" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>Tarefas</span></button>
+                  <button class="dropdown-item view-option" id="tabGallery" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><span>Galeria</span></button>
                 </div>
               </div>
+              <span class="meta-sep" aria-hidden="true"></span>
+              <div class="tag-input-wrap" id="tagInputWrap" title="Adicionar tags (Enter para confirmar)">
+                <span id="tagsContainer"></span>
+                <span class="tag-add-icon" aria-hidden="true"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>
+                <input id="tagInput" type="text" placeholder="Adicionar tag" autocomplete="off" />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div id="toolbar">
+          <div id="toolbar">
           <div class="tool-group">
             <button class="tool-btn" id="tb-bold" type="button" title="Negrito (Ctrl+B)"><b>B</b></button>
             <button class="tool-btn" id="tb-italic" type="button" title="Itálico (Ctrl+I)"><i>I</i></button>
@@ -494,12 +381,12 @@
             </button>
           </div>
         </div>
-        <div id="editorWrap">
-          <div id="editor" contenteditable="true" spellcheck="true"
-            data-placeholder="Comece a escrever suas anotações do dia..."></div>
-        </div>
 
-        <div id="galleryPane">
+          <div id="editorWrap">
+            <div id="editor" contenteditable="true" spellcheck="true" data-placeholder="Comece a escrever..."></div>
+          </div>
+
+          <div id="galleryPane">
           <div class="gallery-toolbar">
             <span id="galleryCount">0 imagens</span>
             <button class="btn-upload" id="uploadImgBtn">
@@ -530,13 +417,23 @@
             <input type="text" id="newChecklistInput" placeholder="+ Nova tarefa... (pressione Enter)" autocomplete="off" />
           </div>
         </div>
-        
+        </div>
+
         <div id="wordCount">
+          <span id="currentDaySubtitle" class="wc-edited"></span>
+          <span class="wc-spacer"></span>
           <span id="wc-words">0 palavras</span>
           <span id="wc-chars">0 caracteres</span>
         </div>
       </div>
     </main>
+
+    <nav id="mobileBottomNav" class="mobile-bottom-nav" aria-label="Navegação principal">
+      <button class="bn-item" id="bnToday" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg><span>Hoje</span></button>
+      <button class="bn-item" id="bnNotes" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg><span>Anotações</span></button>
+      <button class="bn-item" id="bnSearch" type="button"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg><span>Buscar</span></button>
+    </nav>
+    <button id="mobileFab" class="mobile-fab" type="button" title="Nova anotação" aria-label="Nova anotação"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   </div>
 
 
@@ -682,7 +579,7 @@
 
   <div id="toast"><span id="toast-icon">&#x2713;</span><span id="toast-msg">OK</span></div>
 
-  <script src="app.js?v=2.5"></script>
+  <script src="app.js?v=3.0"></script>
 </body>
 
 </html>
