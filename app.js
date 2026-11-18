@@ -2560,10 +2560,14 @@ function positionFloatingToolbar() {
   tb.style.top = `${Math.round(top)}px`;
 }
 let floatTbRaf = 0;
-document.addEventListener('selectionchange', () => {
+function scheduleFloatingToolbar() {
   cancelAnimationFrame(floatTbRaf);
   floatTbRaf = requestAnimationFrame(positionFloatingToolbar);
-});
+}
+document.addEventListener('selectionchange', scheduleFloatingToolbar);
+$('editor')?.addEventListener('mouseup', () => setTimeout(positionFloatingToolbar, 10));
+$('editor')?.addEventListener('keyup', () => setTimeout(positionFloatingToolbar, 10));
+$('editor')?.addEventListener('touchend', () => setTimeout(positionFloatingToolbar, 40));
 $('toolbar')?.addEventListener('mousedown', e => e.preventDefault()); // mantém a seleção ao clicar nos botões
 $('noteScroll')?.addEventListener('scroll', () => {
   if ($('toolbar')?.classList.contains('visible')) positionFloatingToolbar();

@@ -1,8 +1,8 @@
-const CACHE_NAME = 'agenda-cache-v21';
+const CACHE_NAME = 'agenda-cache-v22';
 const urlsToCache = [
   './index.html',
-  './style.css?v=2.5',
-  './app.js?v=2.5',
+  './style.css?v=3.0',
+  './app.js?v=3.0',
   './style.css',
   './app.js',
   './icon.svg'
