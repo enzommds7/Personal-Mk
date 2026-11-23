@@ -52,7 +52,22 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 
 /* ────── Local Storage ────── */
 function localKey() { return currentUser ? `${SK}_${currentUser.uid}` : SK; }
-function loadLocal() { try { return JSON.parse(localStorage.getItem(localKey())) || {}; } catch { return {}; } }
+function loadLocal() {
+  const raw = localStorage.getItem(localKey());
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Formato de anotações inválido');
+    }
+    return parsed;
+  } catch (error) {
+    // Nunca interpretar um backup local corrompido como agenda vazia:
+    // isso poderia fazer a sincronização sobrescrever anotações existentes.
+    console.error('Falha ao ler as anotações locais; dados originais preservados:', error);
+    throw new Error('Não foi possível ler as anotações locais. Preserve os dados do navegador e restaure o backup JSON antes de continuar.', { cause: error });
+  }
+}
 function saveLocal(d) {
   try {
     localStorage.setItem(localKey(), JSON.stringify(d));
