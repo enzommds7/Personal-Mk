@@ -168,6 +168,27 @@ function migrateAnonymousToUserCache() {
   return changed;
 }
 
+// Histórico local de conflitos: nunca publica conteúdo privado no repositório.
+function preserveConflictingDay(key, losingDoc) {
+  const historyKey = localKey() + '_conflicts';
+  try {
+    const previous = JSON.parse(localStorage.getItem(historyKey) || '[]');
+    const history = Array.isArray(previous) ? previous : [];
+    const fingerprint = JSON.stringify([key, losingDoc.updatedAt, losingDoc.content, losingDoc.title]);
+    if (history.some(entry => entry.fingerprint === fingerprint)) return true;
+    history.push({ key, savedAt: new Date().toISOString(), fingerprint, day: losingDoc });
+    // Preserva os 30 conflitos mais recentes; backups JSON externos continuam necessários.
+    localStorage.setItem(historyKey, JSON.stringify(history.slice(-30)));
+    return true;
+  } catch (error) {
+    console.error('Falha ao preservar versão conflitante:', error);
+    if (typeof showToast === 'function' && document.getElementById('toast')) {
+      showToast('Sem espaço para guardar versão conflitante. Exporte backup antes de sincronizar.', true);
+    }
+    return false;
+  }
+}
+
 function mergeRemoteDay(key, remoteDoc, localData) {
   const localDoc = localData[key];
   if (!localDoc) {
@@ -195,6 +216,8 @@ function mergeRemoteDay(key, remoteDoc, localData) {
   
   if (remoteTime >= localTime || (!localTime && remoteTime)) {
     if (dayDiffers(localDoc, remoteDoc)) {
+      // Uma nota local com conteúdo nunca é descartada sem cópia de recuperação.
+      if (!localEmpty && !remoteEmpty && !preserveConflictingDay(key, localDoc)) return false;
       localData[key] = { ...localDoc, ...remoteDoc };
       return true;
     }
