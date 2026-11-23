@@ -507,11 +507,13 @@ async function cloudLoadAll() {
 async function getDay(k) { return localGetDay(k); }
 async function setDay(k, content, tags, images, checklist, title) {
   localSetDay(k, content, tags, images, checklist, title);
-  if (currentUser) cloudSaveDay(k, content, tags, images, checklist);
+  // Aguarda a confirmação do Firestore; a gravação local já ocorreu acima.
+  if (currentUser) return await cloudSaveDay(k, content, tags, images, checklist);
+  return false; // Sem sessão: apenas persistência local confirmada.
 }
 async function delDay(k) {
   localDelDay(k);
-  if (currentUser) cloudDeleteDay(k);
+  if (currentUser) return await cloudDeleteDay(k);
 }
 
 /* ────── Theme ────── */
