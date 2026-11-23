@@ -299,7 +299,10 @@ function checkAndSyncCloud() {
   if (cloudSyncInFlight) return cloudSyncInFlight;
   const operation = performCloudSync();
   cloudSyncInFlight = operation;
-  operation.finally(() => {
+  // Não criar uma Promise rejeitada e sem handler apenas para liberar o lock.
+  operation.then(() => {
+    if (cloudSyncInFlight === operation) cloudSyncInFlight = null;
+  }, () => {
     if (cloudSyncInFlight === operation) cloudSyncInFlight = null;
   });
   return operation;
@@ -2330,7 +2333,7 @@ function validBackupDays(value) {
   if (!entries.length) throw new Error('Backup sem anotações');
   const prepared = {};
   for (const [key, day] of entries) {
-    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(key) || !day || typeof day !== 'object' || Array.isArray(day)) {
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(key) || !day || typeof day !== 'object' || Array.isArray(day)) {
       throw new Error('Data ou anotação inválida');
     }
     if (day.content != null && typeof day.content !== 'string') throw new Error('Conteúdo inválido');
