@@ -2332,7 +2332,14 @@ $('exportBtn').addEventListener('click', () => {
 
 /* ────── Backup / Restore ────── */
 function downloadDaysBackup(days, prefix = 'agenda_backup') {
-  const json = JSON.stringify({ version: 3, exportedAt: new Date().toISOString(), days }, null, 2);
+  let conflicts = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(localKey() + '_conflicts') || '[]');
+    if (Array.isArray(saved)) conflicts = saved;
+  } catch (error) {
+    console.warn('Histórico de conflitos indisponível para exportação:', error);
+  }
+  const json = JSON.stringify({ version: 3, exportedAt: new Date().toISOString(), days, conflicts }, null, 2);
   const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
