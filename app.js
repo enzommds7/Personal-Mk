@@ -292,7 +292,20 @@ function startRealtimeSync() {
   }
 }
 
-async function checkAndSyncCloud() {
+// Evita que eventos de foco, rede e inicialização iniciem merges simultâneos.
+let cloudSyncInFlight = null;
+function checkAndSyncCloud() {
+  if (!currentUser || !FB_ON) return Promise.resolve();
+  if (cloudSyncInFlight) return cloudSyncInFlight;
+  const operation = performCloudSync();
+  cloudSyncInFlight = operation;
+  operation.finally(() => {
+    if (cloudSyncInFlight === operation) cloudSyncInFlight = null;
+  });
+  return operation;
+}
+
+async function performCloudSync() {
   if (!currentUser || !FB_ON) return;
   try {
     setSyncStatus('syncing');
