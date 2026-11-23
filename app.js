@@ -140,7 +140,7 @@ function migrateAnonymousToUserCache() {
   try {
     rawAnon = JSON.parse(localStorage.getItem(SK) || 'null');
   } catch { return false; }
-  if (!rawAnon || typeof rawAnon !== 'object') return false;
+  if (!rawAnon || typeof rawAnon !== 'object' || Array.isArray(rawAnon)) return false;
 
   const userLocal = loadLocal();
   let changed = false;
