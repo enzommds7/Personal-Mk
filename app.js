@@ -527,7 +527,7 @@ function shouldDeferRemoteDay(key) {
   return (pendingCloudWrites.get(key) || 0) > 0 || hasUnsavedEditorChanges(key);
 }
 async function cloudSaveDay(key, content, tags, images, checklist) {
-  if (!db || !currentUser) return;
+  if (!db || !currentUser) return false;
   pendingCloudWrites.set(key, (pendingCloudWrites.get(key) || 0) + 1);
   try {
     setSyncStatus('syncing');
@@ -541,10 +541,12 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
       updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
     }, { merge: true });
     setSyncStatus('synced');
+    return true;
   } catch (e) {
     console.error('cloudSaveDay error:', e);
     setSyncStatus('offline');
     showToast('Salvo neste dispositivo, mas não confirmado na nuvem. Faça backup antes de limpar os dados.', true);
+    return false;
   } finally {
     const remaining = (pendingCloudWrites.get(key) || 1) - 1;
     if (remaining > 0) pendingCloudWrites.set(key, remaining);
@@ -553,7 +555,7 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
 }
 
 async function cloudDeleteDay(key) {
-  if (!db || !currentUser) return;
+  if (!db || !currentUser) return false;
   try {
     await userDaysRef().doc(key).set({
       deleted: true,
@@ -564,10 +566,12 @@ async function cloudDeleteDay(key) {
       checklist: [],
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
+    return true;
   } catch (e) {
     console.error('cloudDeleteDay error:', e);
     setSyncStatus('offline');
     showToast('Exclusão salva localmente, mas não confirmada na nuvem.', true);
+    return false;
   }
 }
 
