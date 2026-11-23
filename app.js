@@ -162,11 +162,9 @@ function migrateAnonymousToUserCache() {
   });
 
   if (changed) saveLocal(userLocal);
-  if (migratedKeys.length > 0) {
-    migratedKeys.forEach(k => delete rawAnon[k]);
-    if (Object.keys(rawAnon).length === 0) localStorage.removeItem(SK);
-    else localStorage.setItem(SK, JSON.stringify(rawAnon));
-  }
+  // Não apagar as notas anônimas após a cópia: elas são uma reserva local
+  // importante caso o upload do usuário falhe ou o Firestore esteja offline.
+  // Repetir a migração é seguro porque mergeRemoteDay compara as versões.
   return changed;
 }
 
