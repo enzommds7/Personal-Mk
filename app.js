@@ -264,6 +264,8 @@ function startRealtimeSync() {
 
       snapshot.docChanges().forEach(change => {
         const doc = change.doc;
+        // Não aplicar versões antigas enquanto há edição ou envio em andamento.
+        if (shouldDeferRemoteDay(doc.id)) return;
         // Ignore local pending writes to avoid self-echoing while typing
         if (doc.metadata && doc.metadata.hasPendingWrites) return;
 
@@ -433,8 +435,20 @@ async function performCloudSync() {
   }
 }
 
+// Protege notas em edição ou com gravação pendente contra snapshots antigos.
+const pendingCloudWrites = new Map();
+function hasUnsavedEditorChanges(key) {
+  return key === activeTab && (
+    document.activeElement === $('editor') ||
+    document.activeElement === $('noteTitle')
+  );
+}
+function shouldDeferRemoteDay(key) {
+  return (pendingCloudWrites.get(key) || 0) > 0 || hasUnsavedEditorChanges(key);
+}
 async function cloudSaveDay(key, content, tags, images, checklist) {
   if (!db || !currentUser) return;
+  pendingCloudWrites.set(key, (pendingCloudWrites.get(key) || 0) + 1);
   try {
     setSyncStatus('syncing');
     await userDaysRef().doc(key).set({ 
@@ -451,6 +465,10 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
     console.error('cloudSaveDay error:', e);
     setSyncStatus('offline');
     showToast('Salvo neste dispositivo, mas não confirmado na nuvem. Faça backup antes de limpar os dados.', true);
+  } finally {
+    const remaining = (pendingCloudWrites.get(key) || 1) - 1;
+    if (remaining > 0) pendingCloudWrites.set(key, remaining);
+    else pendingCloudWrites.delete(key);
   }
 }
 
