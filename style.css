@@ -5186,3 +5186,17 @@ body.no-note #saveStatus {
     display: none !important;
   }
 }
+
+/* Minimal auth branding: no decorative logo tile or rounded headline pill. */
+.auth-brand { gap: 0; }
+.auth-logo-badge { display: none; }
+.auth-hero-pill,
+:root.light .auth-hero-pill {
+  display: inline;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--brand);
+}
+.auth-hero-dot,
+:root.light .auth-hero-dot { display: none; }
