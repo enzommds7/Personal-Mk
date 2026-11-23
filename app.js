@@ -222,7 +222,7 @@ function startRealtimeSync() {
 
   try {
     realtimeUnsubscribe = userDaysRef().onSnapshot(snapshot => {
-      setSyncStatus('synced');
+      // Snapshot recebido não confirma que uploads locais foram persistidos.
       let hasChanges = false;
       const local = loadLocal();
       let activeTabChanged = false;
@@ -357,7 +357,15 @@ async function checkAndSyncCloud() {
     });
 
     if (uploadPromises.length > 0) {
-      await Promise.allSettled(uploadPromises);
+      // Promise.allSettled não lança erro: rejeições precisam ser verificadas.
+      const uploadResults = await Promise.allSettled(uploadPromises);
+      const failures = uploadResults.filter(result => result.status === 'rejected');
+      if (failures.length) {
+        console.warn('Falha ao enviar anotações para a nuvem:', failures.length, failures[0].reason);
+        setSyncStatus('offline');
+        showToast('Algumas anotações ficaram somente neste dispositivo. Exporte um backup antes de limpar dados.', true);
+        return;
+      }
     }
 
     if (hasChanges) {
@@ -406,7 +414,11 @@ async function cloudDeleteDay(key) {
       checklist: [],
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-  } catch (e) { }
+  } catch (e) {
+    console.error('cloudDeleteDay error:', e);
+    setSyncStatus('offline');
+    showToast('Exclusão salva localmente, mas não confirmada na nuvem.', true);
+  }
 }
 
 async function cloudLoadAll() {
