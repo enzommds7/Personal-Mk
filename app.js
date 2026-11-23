@@ -72,7 +72,7 @@ function saveLocal(d) {
   try {
     localStorage.setItem(localKey(), JSON.stringify(d));
     // Espelho assíncrono: não altera o formato do backup nem remove a cópia original.
-    void snapshotCurrentNotes();
+    void snapshotCurrentNotes().catch(error => console.warn('Backup adicional no IndexedDB não confirmado:', error));
   } catch (error) {
     // localStorage pode falhar por quota excedida (ex.: imagens base64) ou bloqueio do navegador.
     console.error('Não foi possível salvar as anotações neste dispositivo:', error);
@@ -129,17 +129,42 @@ async function snapshotNotesToIndexedDB(key, data) {
     transaction.onabort = () => reject(transaction.error);
   });
 }
-async function snapshotCurrentNotes() {
-  try {
-    const key = localKey();
-    const raw = localStorage.getItem(key);
-    if (raw === null) return;
+// Serialize snapshots so an older async transaction cannot overwrite a newer one.
+let notesSnapshotQueue = Promise.resolve();
+function snapshotCurrentNotes() {
+  const key = localKey();
+  let raw;
+  try { raw = localStorage.getItem(key); }
+  catch (error) { return Promise.reject(error); }
+  if (raw === null) return notesSnapshotQueue;
+  notesSnapshotQueue = notesSnapshotQueue.catch(() => {}).then(async () => {
     const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('Snapshot de anotações inválido');
+    }
     await snapshotNotesToIndexedDB(key, data);
-  } catch (error) {
-    console.warn('Backup adicional no IndexedDB não confirmado:', error);
-  }
+  });
+  return notesSnapshotQueue;
+}
+async function readNotesSnapshot(key) {
+  const database = await openNotesSnapshotDb();
+  return new Promise((resolve, reject) => {
+    const request = database.transaction('snapshots', 'readonly').objectStore('snapshots').get(key);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function restoreMissingLocalNotesFromSnapshot() {
+  const key = localKey();
+  // Never replace an existing local dataset, even if it is malformed.
+  if (localStorage.getItem(key) !== null) return false;
+  await notesSnapshotQueue.catch(() => {});
+  const data = await readNotesSnapshot(key);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  // Preserve the snapshot if the browser's localStorage quota prevents recovery.
+  localStorage.setItem(key, JSON.stringify(data));
+  console.info('Anotações locais recuperadas de uma cópia IndexedDB.');
+  return true;
 }
 
 /* ────── Firestore Sync & Realtime Listener ────── */
@@ -3839,6 +3864,9 @@ function initDailyExtras() {
 
 /* ────── App init (after auth) ────── */
 async function initApp() {
+  // Recover only the active account's missing dataset, before cloud listeners run.
+  try { await restoreMissingLocalNotesFromSnapshot(); }
+  catch (error) { console.warn('Recuperação do IndexedDB indisponível:', error); }
   updateUserBar();
   // If cloud user, start realtime sync and fetch data with safety timeout
   if (currentUser && FB_ON) {
@@ -3902,7 +3930,7 @@ async function initApp() {
   try { await spotifyHandleCallback(); } catch (e) { console.warn('Spotify callback warning:', e); }
   try { await initIDB(); } catch (e) { console.warn('IDB init warning:', e); }
   // Primeira cópia dos dados legados antes de qualquer sincronização remota.
-  await snapshotCurrentNotes();
+  try { await snapshotCurrentNotes(); } catch (error) { console.warn('Snapshot inicial indisponível:', error); }
 
   const mode = localStorage.getItem(SK_MODE);
   updateNavState();
