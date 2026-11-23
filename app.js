@@ -2330,6 +2330,81 @@ $('exportBtn').addEventListener('click', () => {
   });
 });
 
+/* ────── Histórico de conflitos ────── */
+function showConflictHistory() {
+  let history;
+  try {
+    history = JSON.parse(localStorage.getItem(localKey() + '_conflicts') || '[]');
+    if (!Array.isArray(history)) throw new Error('Formato inválido');
+  } catch (error) {
+    console.error('Erro ao ler histórico de conflitos:', error);
+    showToast('Não foi possível abrir o histórico.', true);
+    return;
+  }
+  if (!history.length) {
+    showToast('Nenhuma versão conflitante salva neste dispositivo.');
+    return;
+  }
+  const extra = '<div id="conflictHistoryList" style="max-height:50vh;overflow:auto;text-align:left"></div>';
+  openModal({
+    title: 'Versões recuperáveis',
+    body: `${history.length} versão(ões) guardada(s) neste navegador. Antes de restaurar, o app exportará um backup do estado atual.`,
+    extra,
+    actions: [{ label: 'Fechar', cls: 'btn-cancel' }]
+  });
+  const list = $('conflictHistoryList');
+  history.slice().reverse().forEach((entry, index) => {
+    if (!entry || !entry.day || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(entry.key || '')) return;
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:10px 0;border-bottom:1px solid var(--border, #7774)';
+    const label = document.createElement('div');
+    const date = entry.savedAt && !Number.isNaN(Date.parse(entry.savedAt))
+      ? new Date(entry.savedAt).toLocaleString('pt-BR') : 'Data desconhecida';
+    label.textContent = `${entry.key} — preservada em ${date}`;
+    const preview = document.createElement('div');
+    preview.style.cssText = 'opacity:.7;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere';
+    preview.textContent = (entry.day.title || '') + ' ' + toPlain(entry.day.content || '').slice(0, 140);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn-secondary';
+    button.textContent = 'Restaurar esta versão';
+    button.addEventListener('click', () => {
+      if (!window.confirm(`Restaurar a versão de ${entry.key}? O estado atual será exportado primeiro.`)) return;
+      try {
+        const before = loadLocal();
+        downloadDaysBackup(before, 'agenda_antes_recuperacao');
+        const restored = { ...entry.day, updatedAt: new Date().toISOString() };
+        saveLocal({ ...before, [entry.key]: restored });
+        closeModal();
+        refreshAll();
+        // O envio para a nuvem fica a cargo do fluxo de sincronização existente.
+        if (currentUser && FB_ON) checkAndSyncCloud();
+        showToast('Versão recuperada. Confira a anotação e guarde o backup.');
+      } catch (error) {
+        console.error('Falha ao recuperar versão:', error);
+        showToast('Recuperação falhou; não descarte o backup.', true);
+      }
+    });
+    row.append(label, preview, button);
+    list.appendChild(row);
+  });
+}
+function installConflictHistoryButton() {
+  const anchor = $('settingsRestoreBtn');
+  if (!anchor || $('settingsConflictHistoryBtn')) return;
+  const button = document.createElement('button');
+  button.id = 'settingsConflictHistoryBtn';
+  button.type = 'button';
+  button.className = anchor.className;
+  button.textContent = 'Histórico de versões conflitantes';
+  button.addEventListener('click', () => {
+    closeSettings();
+    showConflictHistory();
+  });
+  anchor.insertAdjacentElement('afterend', button);
+}
+installConflictHistoryButton();
+
 /* ────── Backup / Restore ────── */
 function downloadDaysBackup(days, prefix = 'agenda_backup') {
   let conflicts = [];
