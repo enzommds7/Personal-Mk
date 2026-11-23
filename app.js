@@ -1868,7 +1868,13 @@ async function saveCurrent() {
   if (!activeTab || isApplyingRemoteChange) return;
   const day = localGetDay(activeTab); 
   const titleVal = $('noteTitle') ? $('noteTitle').value.trim() : undefined;
-  await setDay(activeTab, $('editor').innerHTML, currentTags, day.images, currentChecklist, titleVal);
+  try {
+    await setDay(activeTab, $('editor').innerHTML, currentTags, day.images, currentChecklist, titleVal);
+  } catch (error) {
+    console.error('Falha ao salvar a anotação:', error);
+    setSave('saving');
+    return;
+  }
   setSave('saved'); renderSidebar($('searchInput').value); renderTagFilterBar(); renderCalendar();
   $('currentDaySubtitle').textContent = fmtEdited(new Date().toISOString());
 }
@@ -2288,64 +2294,95 @@ $('exportBtn').addEventListener('click', () => {
 });
 
 /* ────── Backup / Restore ────── */
-function doBackup() {
-  const data = loadLocal();
-  const json = JSON.stringify({ version: 3, exportedAt: new Date().toISOString(), days: data }, null, 2);
+function downloadDaysBackup(days, prefix = 'agenda_backup') {
+  const json = JSON.stringify({ version: 3, exportedAt: new Date().toISOString(), days }, null, 2);
   const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = `agenda_backup_${todayKey()}.json`; a.click();
-  URL.revokeObjectURL(url); toast('Backup exportado!', '');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${prefix}_${todayKey()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+function doBackup() {
+  downloadDaysBackup(loadLocal());
+  toast('Backup exportado!', '');
 }
 function doRestore() { $('restoreFileInput').click(); }
+function validBackupDays(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Estrutura inválida');
+  const entries = Object.entries(value);
+  if (!entries.length) throw new Error('Backup sem anotações');
+  const prepared = {};
+  for (const [key, day] of entries) {
+    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(key) || !day || typeof day !== 'object' || Array.isArray(day)) {
+      throw new Error('Data ou anotação inválida');
+    }
+    if (day.content != null && typeof day.content !== 'string') throw new Error('Conteúdo inválido');
+    for (const field of ['tags', 'images', 'checklist']) {
+      if (day[field] != null && !Array.isArray(day[field])) throw new Error('Campo inválido: ' + field);
+    }
+    prepared[key] = {
+      content: day.content || '',
+      title: typeof day.title === 'string' ? day.title : '',
+      tags: day.tags || [],
+      images: day.images || [],
+      checklist: day.checklist || [],
+      updatedAt: day.updatedAt && !Number.isNaN(Date.parse(day.updatedAt)) ? day.updatedAt : new Date().toISOString()
+    };
+  }
+  return prepared;
+}
 $('backupBtn').addEventListener('click', doBackup);
 $('restoreBtn').addEventListener('click', doRestore);
 $('restoreFileInput').addEventListener('change', e => {
-  const file = e.target.files[0]; if (!file) return;
+  const file = e.target.files[0];
+  if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
       const parsed = JSON.parse(ev.target.result);
-      const importedDays = parsed.days || parsed;
-      if (typeof importedDays !== 'object') throw new Error();
-      const count = Object.keys(importedDays).length;
+      if (parsed.version != null && parsed.version !== 3) throw new Error('Versão de backup não suportada');
+      const imported = validBackupDays(parsed.days || parsed);
+      const count = Object.keys(imported).length;
+      const existing = loadLocal();
+      const overlaps = Object.keys(imported).filter(k => existing[k]).length;
       openModal({
-        title: 'Restaurar Backup',
-        body: `${count} dia(s) encontrado(s). Como importar?`,
+        title: 'Importar backup com segurança',
+        body: `${count} dias encontrados; ${overlaps} já existem neste dispositivo. A importação fará um backup dos dados atuais antes de alterar qualquer anotação. Nenhuma nota será apagada automaticamente.`,
         actions: [
           { label: 'Cancelar', cls: 'btn-cancel' },
           {
-            label: 'Mesclar', cls: 'btn-secondary', cb: () => {
-              const cur = loadLocal();
-              Object.entries(importedDays).forEach(([k, v]) => {
-                if (v && typeof v === 'object') {
-                  cur[k] = { ...v, updatedAt: v.updatedAt || new Date().toISOString() };
-                }
-              });
-              saveLocal(cur);
-              refreshAll();
-              if (currentUser && FB_ON) checkAndSyncCloud();
-              toast(`${count} dia(s) importados (mesclado).`, '');
-            }
-          },
-          {
-            label: 'Substituir tudo', cls: 'btn-danger', cb: () => {
-              const prepared = {};
-              Object.entries(importedDays).forEach(([k, v]) => {
-                if (v && typeof v === 'object') {
-                  prepared[k] = { ...v, updatedAt: v.updatedAt || new Date().toISOString() };
-                }
-              });
-              saveLocal(prepared); openTabs = []; activeTab = null; saveTabState();
-              refreshAll(); showWelcome();
-              if (currentUser && FB_ON) checkAndSyncCloud();
-              toast(`${count} dia(s) importados.`, '');
+            label: 'Mesclar (manter demais)', cls: 'btn-secondary', cb: () => {
+              try {
+                downloadDaysBackup(existing, 'agenda_antes_importacao');
+                const now = Date.now();
+                const prepared = {};
+                Object.entries(imported).forEach(([key, day], index) => {
+                  // A escolha explícita de importar prevalece sobre cópias antigas na nuvem.
+                  prepared[key] = { ...day, updatedAt: new Date(now + index).toISOString() };
+                });
+                saveLocal({ ...existing, ...prepared });
+                refreshAll();
+                showToast(`${count} dias importados localmente. Confira os dados antes de sincronizar.`);
+              } catch (err) {
+                console.error('Erro ao importar backup:', err);
+                showToast('Não foi possível importar. Os dados anteriores foram preservados.', true);
+              }
             }
           }
         ]
       });
-    } catch (e) { toast('Arquivo inválido.', ''); }
+    } catch (err) {
+      console.warn('Backup rejeitado:', err);
+      showToast('Arquivo de backup inválido ou incompatível.', true);
+    }
   };
-  reader.readAsText(file); e.target.value = '';
+  reader.onerror = () => showToast('Não foi possível ler o arquivo.', true);
+  reader.readAsText(file);
+  e.target.value = '';
 });
 
 /* ────── Search ────── */
