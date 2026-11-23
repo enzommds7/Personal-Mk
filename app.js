@@ -71,6 +71,8 @@ function loadLocal() {
 function saveLocal(d) {
   try {
     localStorage.setItem(localKey(), JSON.stringify(d));
+    // Espelho assíncrono: não altera o formato do backup nem remove a cópia original.
+    void snapshotCurrentNotes();
   } catch (error) {
     // localStorage pode falhar por quota excedida (ex.: imagens base64) ou bloqueio do navegador.
     console.error('Não foi possível salvar as anotações neste dispositivo:', error);
@@ -101,6 +103,44 @@ function localSetDay(k, content, tags, images, checklist, title) {
 }
 function localDelDay(k) { const d = loadLocal(); delete d[k]; saveLocal(d); }
 function allKeys() { return Object.keys(loadLocal()).sort().reverse(); }
+
+/* ────── IndexedDB snapshot (non-destructive migration stage) ────── */
+// Keep the legacy localStorage format until all synchronous readers are migrated.
+// The snapshot is a second copy, never a reason to delete the original.
+const NOTES_SNAPSHOT_DB = 'AgendaNotesBackupDB';
+let notesSnapshotDbPromise = null;
+function openNotesSnapshotDb() {
+  if (!notesSnapshotDbPromise) notesSnapshotDbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') return reject(new Error('IndexedDB indisponível'));
+    const request = indexedDB.open(NOTES_SNAPSHOT_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore('snapshots');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  return notesSnapshotDbPromise;
+}
+async function snapshotNotesToIndexedDB(key, data) {
+  const database = await openNotesSnapshotDb();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction('snapshots', 'readwrite');
+    transaction.objectStore('snapshots').put(data, key);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+}
+async function snapshotCurrentNotes() {
+  try {
+    const key = localKey();
+    const raw = localStorage.getItem(key);
+    if (raw === null) return;
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+    await snapshotNotesToIndexedDB(key, data);
+  } catch (error) {
+    console.warn('Backup adicional no IndexedDB não confirmado:', error);
+  }
+}
 
 /* ────── Firestore Sync & Realtime Listener ────── */
 function userDaysRef() { return db.collection('users').doc(currentUser.uid).collection('days'); }
@@ -3861,6 +3901,8 @@ async function initApp() {
   loadTheme();
   try { await spotifyHandleCallback(); } catch (e) { console.warn('Spotify callback warning:', e); }
   try { await initIDB(); } catch (e) { console.warn('IDB init warning:', e); }
+  // Primeira cópia dos dados legados antes de qualquer sincronização remota.
+  await snapshotCurrentNotes();
 
   const mode = localStorage.getItem(SK_MODE);
   updateNavState();
