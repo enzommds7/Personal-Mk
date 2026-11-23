@@ -5200,14 +5200,3 @@ body.no-note #saveStatus {
 }
 .auth-hero-dot,
 :root.light .auth-hero-dot { display: none; }
-
-/* Login-only cleanup: Facebook-inspired hierarchy, no floating top-right pills. */
-#authScreen .auth-navbar { max-width: 1180px; padding: 28px 36px; }
-#authScreen .auth-brand-name { font-size: 22px; font-weight: 800; letter-spacing: -0.7px; color: var(--brand); }
-#authScreen .auth-container { max-width: 1100px; }
-#authScreen .auth-utility-row { display: flex; justify-content: center; align-items: center; gap: 9px; margin-top: 18px; font-size: 12px; color: var(--text-muted); }
-#authScreen .auth-utility-row .auth-theme-btn { width: 28px; height: 28px; border: none; background: transparent; border-radius: 4px; color: var(--text-secondary); }
-#authScreen .auth-utility-row .auth-theme-btn:hover { background: var(--bg-card-hover); }
-#authScreen .auth-card { border-radius: 8px; }
-#authScreen .auth-offline { border-radius: 6px; }
-@media (max-width: 600px) { #authScreen .auth-navbar { padding: 20px 18px; } }
