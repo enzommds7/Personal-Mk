@@ -1,64 +1,69 @@
-const CACHE_NAME = 'agenda-cache-v22';
-const urlsToCache = [
+// Cache apenas recursos estáticos. Dados pessoais ficam no armazenamento do app.
+const CACHE_NAME = 'personalmk-static-v23';
+const PRECACHE = [
   './index.html',
   './style.css?v=3.0',
   './app.js?v=3.0',
-  './style.css',
-  './app.js',
   './icon.svg'
 ];
+const APP_PREFIXES = ['personalmk-static-', 'agenda-cache-'];
 
 self.addEventListener('install', event => {
-  self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(urlsToCache))
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(PRECACHE)));
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME) {
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const names = await caches.keys();
+    await Promise.all(names.filter(name =>
+      name !== CACHE_NAME && APP_PREFIXES.some(prefix => name.startsWith(prefix))
+    ).map(name => caches.delete(name)));
+    await self.clients.claim();
+  })());
 });
 
 self.addEventListener('fetch', event => {
-  const req = event.request;
- 
-  if (req.method !== 'GET') return;
-  if (new URL(req.url).origin !== self.location.origin) return;
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
 
-  event.respondWith(
-    fetch(req).then(response => {
-      const copy = response.clone();
-      caches.open(CACHE_NAME).then(cache => cache.put(req, copy)).catch(() => { });
+  // Não cachear APIs, endpoints dinâmicos nem caminhos desconhecidos.
+  const path = url.pathname;
+  const isNavigation = request.mode === 'navigate';
+  const isStatic = /\/(?:index\.html|app\.js|style\.css|icon\.svg)$/.test(path);
+  if (!isNavigation && !isStatic) return;
+
+  event.respondWith((async () => {
+    try {
+      const response = await fetch(request);
+      if (response.ok && response.type === 'basic') {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(request, response.clone()).catch(() => {});
+      }
       return response;
-    }).catch(() => caches.match(req))
-  );
+    } catch (error) {
+      const cached = await caches.match(request);
+      if (cached) return cached;
+      if (isNavigation) {
+        const shell = await caches.match('./index.html');
+        if (shell) return shell;
+      }
+      return Response.error();
+    }
+  })());
 });
 
-/* ────── Clique na notificação ────── */
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   const data = event.notification.data || {};
   const target = data.url || self.registration.scope;
-
   event.waitUntil((async () => {
-    // Link externo (ex: música no Spotify) → abre direto
     if (data.url && !data.url.startsWith(self.registration.scope)) {
       return self.clients.openWindow(data.url);
     }
-    // Senão, foca o app se já estiver aberto
-    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const client of all) {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
       if (client.url.startsWith(self.registration.scope) && 'focus' in client) {
         return client.focus();
       }
