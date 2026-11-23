@@ -53,7 +53,21 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 /* ────── Local Storage ────── */
 function localKey() { return currentUser ? `${SK}_${currentUser.uid}` : SK; }
 function loadLocal() { try { return JSON.parse(localStorage.getItem(localKey())) || {}; } catch { return {}; } }
-function saveLocal(d) { localStorage.setItem(localKey(), JSON.stringify(d)); }
+function saveLocal(d) {
+  try {
+    localStorage.setItem(localKey(), JSON.stringify(d));
+  } catch (error) {
+    // localStorage pode falhar por quota excedida (ex.: imagens base64) ou bloqueio do navegador.
+    console.error('Não foi possível salvar as anotações neste dispositivo:', error);
+    const message = 'Falha ao salvar as anotações neste dispositivo. Não feche esta aba. Libere espaço e exporte um backup antes de continuar.';
+    if (typeof showToast === 'function' && document.getElementById('toast')) {
+      showToast(message, true);
+    } else {
+      window.alert(message);
+    }
+    throw error;
+  }
+}
 function localGetDay(k) { return loadLocal()[k] || { content: '', updatedAt: null, tags: [], images: [], checklist: [] }; }
 function localSetDay(k, content, tags, images, checklist, title) {
   const d = loadLocal();
