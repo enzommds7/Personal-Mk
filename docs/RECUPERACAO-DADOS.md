@@ -17,9 +17,11 @@ O backup do PC de trabalho é a fonte de recuperação escolhida pelo proprietá
 - [x] Backup exportado e mantido fora do repositório
 - [x] Service Worker: cache limitado aos recursos do aplicativo
 - [x] Sincronização: falhas de upload deixam de ser tratadas como sucesso
-- [ ] Importação com pré-visualização, validação e rollback
+- [x] Importação com validação e exportação preventiva do estado anterior (rollback manual pelo JSON exportado)
+- [ ] Pré-visualização detalhada e rollback automático
+- [x] Evitar reconciliações simultâneas por eventos de foco/rede
 - [ ] Estratégia de conflitos e fila offline
 - [ ] Testes em múltiplos navegadores/dispositivos
 - [ ] Revisão de regras de segurança do Firebase
 
-**Não fazer merge desta branch enquanto as etapas críticas não estiverem verificadas.**
+**Aviso:** alterações autorizadas na main pelo proprietário. A sincronização multidispositivo ainda não foi validada em dispositivos reais. Preserve o backup original.
