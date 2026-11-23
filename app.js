@@ -399,6 +399,7 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
   } catch (e) {
     console.error('cloudSaveDay error:', e);
     setSyncStatus('offline');
+    showToast('Salvo neste dispositivo, mas não confirmado na nuvem. Faça backup antes de limpar os dados.', true);
   }
 }
 
