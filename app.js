@@ -220,19 +220,76 @@ function dayDiffers(a, b) {
     JSON.stringify(a.checklist || []) !== JSON.stringify(b.checklist || []);
 }
 
-function migrateAnonymousToUserCache() {
-  if (!currentUser) return false;
-  let rawAnon = null;
+// O histórico usa o mesmo banco IndexedDB das cópias de segurança,
+// com uma chave separada por conta. Nenhum conteúdo privado vai ao GitHub.
+function combineConflictHistory(...groups) {
+  const history = new Map();
+  for (const group of groups) {
+    if (!Array.isArray(group)) throw new Error('Histórico de conflitos inválido');
+    for (const entry of group) {
+      if (!entry || !entry.day || typeof entry.key !== 'string') throw new Error('Versão inválida');
+      const d = entry.day;
+      const identity = JSON.stringify([entry.key, d.updatedAt || null, d.content || '',
+        d.title || '', d.tags || [], d.images || [], d.checklist || [], !!d.deleted]);
+      if (!history.has(identity)) history.set(identity, {key: entry.key, savedAt: entry.savedAt, day: d});
+    }
+  }
+  return [...history.values()];
+}
+async function updateConflictHistory(accountKey, additions = []) {
+  const legacyKey = accountKey + '_conflicts';
+  const legacyRaw = localStorage.getItem(legacyKey);
+  const legacy = legacyRaw === null ? [] : JSON.parse(legacyRaw);
+  const database = await openNotesSnapshotDb();
+  const history = await new Promise((resolve, reject) => {
+    const transaction = database.transaction('snapshots', 'readwrite');
+    const store = transaction.objectStore('snapshots');
+    const key = 'conflicts:' + accountKey;
+    let combined;
+    transaction.oncomplete = () => resolve(combined);
+    transaction.onerror = () => reject(transaction.error || new Error('Falha no histórico IndexedDB'));
+    transaction.onabort = () => reject(transaction.error || new Error('Histórico não gravado'));
+    const request = store.get(key);
+    request.onsuccess = () => {
+      try {
+        combined = combineConflictHistory(request.result ?? [], legacy, additions);
+        store.put(combined, key);
+      } catch (error) {
+        reject(error);
+        transaction.abort();
+      }
+    };
+  });
+  // Só remove a cópia legada após commit da transação; se outra aba alterou
+  // o conteúdo, mantém a origem para que a próxima migração o preserve também.
+  if (legacyRaw !== null && localStorage.getItem(legacyKey) === legacyRaw) {
+    localStorage.removeItem(legacyKey);
+  }
+  return history;
+}
+async function preserveConflictingDay(key, losingDoc) {
+  const accountKey = localKey();
   try {
-    rawAnon = JSON.parse(localStorage.getItem(SK) || 'null');
-  } catch { return false; }
-  if (!rawAnon || typeof rawAnon !== 'object' || Array.isArray(rawAnon)) return false;
+    await updateConflictHistory(accountKey, [{key, savedAt: new Date().toISOString(), day: losingDoc}]);
+    return true;
+  } catch (error) {
+    console.error('Falha ao preservar versão conflitante no IndexedDB:', error);
+    showToast('Não foi possível guardar a versão conflitante. Exporte um backup antes de continuar.', true);
+    return false;
+  }
+}
 
-  const userLocal = loadLocal();
+async function migrateAnonymousToUserCache() {
+  if (!currentUser) return false;
+  const accountKey = localKey();
+  let rawAnon;
+  try { rawAnon = JSON.parse(localStorage.getItem(SK) || 'null'); }
+  catch { return false; }
+  if (!rawAnon || typeof rawAnon !== 'object' || Array.isArray(rawAnon)) return false;
   let changed = false;
-  const migratedKeys = [];
-  Object.entries(rawAnon).forEach(([key, anonDoc]) => {
-    if (!hasRealContent(anonDoc)) return;
+  for (const [key, anonDoc] of Object.entries(rawAnon)) {
+    if (localKey() !== accountKey) break;
+    if (!hasRealContent(anonDoc)) continue;
     const targetDoc = {
       content: anonDoc.content || '',
       tags: Array.isArray(anonDoc.tags) ? anonDoc.tags : [],
@@ -241,74 +298,33 @@ function migrateAnonymousToUserCache() {
       title: typeof anonDoc.title === 'string' ? anonDoc.title : '',
       updatedAt: anonDoc.updatedAt || null
     };
-    if (mergeRemoteDay(key, targetDoc, userLocal)) {
-      changed = true;
-    }
-    migratedKeys.push(key);
-  });
-
-  if (changed) saveLocal(userLocal);
-  // Não apagar as notas anônimas após a cópia: elas são uma reserva local
-  // importante caso o upload do usuário falhe ou o Firestore esteja offline.
-  // Repetir a migração é seguro porque mergeRemoteDay compara as versões.
+    if (await mergeRemoteDay(key, targetDoc, accountKey)) changed = true;
+  }
   return changed;
 }
 
-// Histórico local de conflitos: nunca publica conteúdo privado no repositório.
-function preserveConflictingDay(key, losingDoc) {
-  const historyKey = localKey() + '_conflicts';
-  try {
-    const previous = JSON.parse(localStorage.getItem(historyKey) || '[]');
-    const history = Array.isArray(previous) ? previous : [];
-    const fingerprint = JSON.stringify([key, losingDoc.updatedAt, losingDoc.content, losingDoc.title, losingDoc.tags, losingDoc.images, losingDoc.checklist]);
-    if (history.some(entry => entry.fingerprint === fingerprint)) return true;
-    history.push({ key, savedAt: new Date().toISOString(), fingerprint, day: losingDoc });
-    // Preserva os 30 conflitos mais recentes; backups JSON externos continuam necessários.
-    localStorage.setItem(historyKey, JSON.stringify(history.slice(-30)));
-    return true;
-  } catch (error) {
-    console.error('Falha ao preservar versão conflitante:', error);
-    if (typeof showToast === 'function' && document.getElementById('toast')) {
-      showToast('Sem espaço para guardar versão conflitante. Exporte backup antes de sincronizar.', true);
-    }
-    return false;
-  }
-}
-
-function mergeRemoteDay(key, remoteDoc, localData) {
-  const localDoc = localData[key];
-  if (!localDoc) {
-    localData[key] = remoteDoc;
-    return true;
-  }
-  
-  const remoteEmpty = !hasRealContent(remoteDoc);
-  const localEmpty = !hasRealContent(localDoc);
-  
-  // Rule 1: A placeholder/empty local note NEVER overwrites a cloud note with content
-  if (localEmpty && !remoteEmpty) {
-    localData[key] = { ...localDoc, ...remoteDoc };
-    return true;
-  }
-  
-  // Rule 2: If cloud note has no content while local note does, keep local note
-  if (!localEmpty && remoteEmpty) {
-    return false;
-  }
-  
-  // Rule 3: Compare timestamps
-  const remoteTime = remoteDoc.updatedAt ? new Date(remoteDoc.updatedAt).getTime() : 0;
-  const localTime = localDoc.updatedAt ? new Date(localDoc.updatedAt).getTime() : 0;
-  
-  if (remoteTime >= localTime || (!localTime && remoteTime)) {
-    if (dayDiffers(localDoc, remoteDoc)) {
-      // Uma nota local com conteúdo nunca é descartada sem cópia de recuperação.
-      if (!localEmpty && !remoteEmpty && !preserveConflictingDay(key, localDoc)) return false;
-      localData[key] = { ...localDoc, ...remoteDoc };
-      return true;
+// A cópia é assíncrona: reler o estado antes de aplicar a versão remota
+// impede que uma edição feita durante a gravação IndexedDB seja substituída.
+async function mergeRemoteDay(key, remoteDoc, accountKey) {
+  if (localKey() !== accountKey || shouldDeferRemoteDay(key)) return false;
+  const original = loadLocal()[key];
+  if (original) {
+    const localEmpty = !hasRealContent(original);
+    const remoteEmpty = !hasRealContent(remoteDoc);
+    if (!localEmpty && remoteEmpty) return false;
+    if (!localEmpty || remoteEmpty) {
+      const localTime = Date.parse(original.updatedAt) || 0;
+      const remoteTime = Date.parse(remoteDoc.updatedAt) || 0;
+      if (remoteTime < localTime || !dayDiffers(original, remoteDoc)) return false;
+      if (!localEmpty && !remoteEmpty && !await preserveConflictingDay(key, original)) return false;
     }
   }
-  return false;
+  if (localKey() !== accountKey || shouldDeferRemoteDay(key)) return false;
+  const latest = loadLocal();
+  if (JSON.stringify(latest[key]) !== JSON.stringify(original)) return false;
+  latest[key] = {...original, ...remoteDoc};
+  saveLocal(latest);
+  return true;
 }
 
 function applyRemoteEditorUpdate(local, activeTabChanged) {
@@ -340,29 +356,35 @@ function startRealtimeSync() {
   }
 
   setSyncStatus('syncing');
+  const accountKey = localKey();
+  let snapshotQueue = Promise.resolve();
 
   try {
     realtimeUnsubscribe = userDaysRef().onSnapshot(snapshot => {
+      snapshotQueue = snapshotQueue.catch(() => {}).then(async () => {
+      if (localKey() !== accountKey) return;
       // Snapshot recebido não confirma que uploads locais foram persistidos.
       let hasChanges = false;
-      const local = loadLocal();
       let activeTabChanged = false;
 
-      snapshot.docChanges().forEach(change => {
+      for (const change of snapshot.docChanges()) {
+        if (localKey() !== accountKey) return;
         const doc = change.doc;
         // Não aplicar versões antigas enquanto há edição ou envio em andamento.
-        if (shouldDeferRemoteDay(doc.id)) return;
+        if (shouldDeferRemoteDay(doc.id)) continue;
         // Ignore local pending writes to avoid self-echoing while typing
-        if (doc.metadata && doc.metadata.hasPendingWrites) return;
+        if (doc.metadata && doc.metadata.hasPendingWrites) continue;
 
         const key = doc.id;
         const raw = doc.data();
         if (change.type === 'removed' || raw?.deleted) {
+          const local = loadLocal();
           if (local[key]) {
             const remTime = raw?.updatedAt?.toDate?.()?.getTime?.() || (raw?.updatedAt ? new Date(raw.updatedAt).getTime() : 0);
             const locTime = local[key].updatedAt ? new Date(local[key].updatedAt).getTime() : 0;
             if (change.type === 'removed' || !locTime || remTime >= locTime) {
               delete local[key];
+              saveLocal(local);
               hasChanges = true;
               if (activeTab === key) activeTabChanged = true;
             }
@@ -377,20 +399,20 @@ function startRealtimeSync() {
             updatedAt: raw.updatedAt?.toDate?.()?.toISOString() || raw.updatedAt || null
           };
 
-          if (mergeRemoteDay(key, remote, local)) {
+          if (await mergeRemoteDay(key, remote, accountKey)) {
             hasChanges = true;
             if (activeTab === key) activeTabChanged = true;
           }
         }
-      });
+      }
 
-      if (hasChanges) {
-        saveLocal(local);
+      if (localKey() === accountKey && hasChanges) {
         renderSidebar($('searchInput')?.value || '');
         renderTagFilterBar();
         renderCalendar();
-        applyRemoteEditorUpdate(local, activeTabChanged);
+        applyRemoteEditorUpdate(loadLocal(), activeTabChanged);
       }
+      }).catch(error => { console.warn('Realtime merge falhou:', error); setSyncStatus('offline'); });
     }, err => {
       console.warn('Realtime sync warning:', err);
       setSyncStatus('offline');
@@ -421,9 +443,13 @@ async function performCloudSync() {
   if (!currentUser || !FB_ON) return;
   try {
     setSyncStatus('syncing');
-    const migrated = migrateAnonymousToUserCache();
     const uid = currentUser.uid;
+    const accountKey = localKey();
     const ref = userDaysRef();
+    await updateConflictHistory(accountKey);
+    if (currentUser?.uid !== uid) return;
+    const migrated = await migrateAnonymousToUserCache();
+    if (currentUser?.uid !== uid) return;
     const pendingDeletes = JSON.parse(localStorage.getItem(localKey() + '_pendingDeletes') || '{}');
     const deleteResults = await Promise.all(Object.keys(pendingDeletes).map(key => cloudDeleteDay(key)));
     if (currentUser?.uid !== uid) return;
@@ -443,30 +469,32 @@ async function performCloudSync() {
     if (currentUser?.uid !== uid) return;
     const snap = await ref.get({ source: 'server' });
     if (currentUser?.uid !== uid) return;
-    const local = loadLocal();
     const remoteDocs = {};
     let hasChanges = migrated;
     let activeTabChanged = false;
 
-    snap.forEach(doc => {
+    for (const doc of snap.docs) {
+      if (currentUser?.uid !== uid) return;
       const raw = doc.data();
       if (shouldDeferRemoteDay(doc.id)) {
         remoteDocs[doc.id] = { deferred: true };
-        return;
+        continue;
       }
       const updIso = raw.updatedAt?.toDate?.()?.toISOString() || raw.updatedAt || null;
       if (raw.deleted) {
         const remTime = updIso ? new Date(updIso).getTime() : 0;
         remoteDocs[doc.id] = { deleted: true, updatedAt: updIso, time: remTime };
+        const local = loadLocal();
         if (local[doc.id]) {
           const locTime = local[doc.id].updatedAt ? new Date(local[doc.id].updatedAt).getTime() : 0;
           if (!locTime || remTime >= locTime) {
             delete local[doc.id];
+            saveLocal(local);
             hasChanges = true;
             if (activeTab === doc.id) activeTabChanged = true;
           }
         }
-        return;
+        continue;
       }
 
       const remote = {
@@ -478,14 +506,15 @@ async function performCloudSync() {
         updatedAt: updIso
       };
       remoteDocs[doc.id] = remote;
-      if (mergeRemoteDay(doc.id, remote, local)) {
+      if (await mergeRemoteDay(doc.id, remote, accountKey)) {
         hasChanges = true;
         if (activeTab === doc.id) activeTabChanged = true;
       }
-    });
+    }
 
+    if (currentUser?.uid !== uid) return;
+    const local = loadLocal();
     if (hasChanges) {
-      saveLocal(local);
       renderSidebar($('searchInput')?.value || '');
       renderTagFilterBar();
       renderCalendar();
@@ -597,7 +626,7 @@ async function cloudSaveDay(key) {
           throw new Error('Exclusão remota concorrente: edição mantida localmente');
         }
         if (!remote.deleted && dayDiffers(day, remote)) {
-          if (!preserveConflictingDay(key, { ...remote, updatedAt: remoteStamp })) {
+          if (!await preserveConflictingDay(key, { ...remote, updatedAt: remoteStamp })) {
             throw new Error('Não foi possível preservar a versão remota');
           }
           if (Date.parse(remoteStamp) > Date.parse(stamp)) {
@@ -2532,11 +2561,12 @@ $('exportBtn').addEventListener('click', () => {
 });
 
 /* ────── Histórico de conflitos ────── */
-function showConflictHistory() {
+async function showConflictHistory() {
+  const accountKey = localKey();
   let history;
   try {
-    history = JSON.parse(localStorage.getItem(localKey() + '_conflicts') || '[]');
-    if (!Array.isArray(history)) throw new Error('Formato inválido');
+    history = await updateConflictHistory(accountKey);
+    if (localKey() !== accountKey) return;
   } catch (error) {
     console.error('Erro ao ler histórico de conflitos:', error);
     showToast('Não foi possível abrir o histórico.', true);
@@ -2569,11 +2599,13 @@ function showConflictHistory() {
     button.type = 'button';
     button.className = 'btn-secondary';
     button.textContent = 'Restaurar esta versão';
-    button.addEventListener('click', () => {
+    button.addEventListener('click', async () => {
+      if (localKey() !== accountKey) return;
       if (!window.confirm(`Restaurar a versão de ${entry.key}? O estado atual será exportado primeiro.`)) return;
       try {
         const before = loadLocal();
-        downloadDaysBackup(before, 'agenda_antes_recuperacao');
+        await downloadDaysBackup(before, 'agenda_antes_recuperacao');
+        if (localKey() !== accountKey || JSON.stringify(loadLocal()) !== JSON.stringify(before)) throw new Error('Dados alterados durante o backup');
         const restored = { ...entry.day, updatedAt: new Date().toISOString() };
         saveLocal({ ...before, [entry.key]: restored });
         closeModal();
@@ -2607,14 +2639,19 @@ function installConflictHistoryButton() {
 installConflictHistoryButton();
 
 /* ────── Backup / Restore ────── */
-function downloadDaysBackup(days, prefix = 'agenda_backup') {
+async function downloadDaysBackup(days, prefix = 'agenda_backup') {
+  const accountKey = localKey();
   let conflicts = [];
   try {
-    const saved = JSON.parse(localStorage.getItem(localKey() + '_conflicts') || '[]');
-    if (Array.isArray(saved)) conflicts = saved;
+    conflicts = await updateConflictHistory(accountKey);
   } catch (error) {
-    console.warn('Histórico de conflitos indisponível para exportação:', error);
+    // Um backup das notas continua possível se o IndexedDB estiver indisponível.
+    console.warn('Histórico IndexedDB indisponível para exportação:', error);
+    try { conflicts = JSON.parse(localStorage.getItem(accountKey + '_conflicts') || '[]'); }
+    catch { conflicts = []; }
+    showToast('Backup das notas: histórico IndexedDB não confirmado.', true);
   }
+  if (localKey() !== accountKey) throw new Error('Conta alterada durante exportação');
   const json = JSON.stringify({ version: 3, exportedAt: new Date().toISOString(), days, conflicts }, null, 2);
   const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -2626,9 +2663,11 @@ function downloadDaysBackup(days, prefix = 'agenda_backup') {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
-function doBackup() {
-  downloadDaysBackup(loadLocal());
-  toast('Backup exportado!', '');
+async function doBackup() {
+  try {
+    await downloadDaysBackup(loadLocal());
+    toast('Backup das notas exportado!', '');
+  } catch (error) { console.error(error); showToast('Não foi possível exportar o backup.', true); }
 }
 function doRestore() { $('restoreFileInput').click(); }
 function validBackupDays(value) {
@@ -2675,16 +2714,19 @@ $('restoreFileInput').addEventListener('change', e => {
         actions: [
           { label: 'Cancelar', cls: 'btn-cancel' },
           {
-            label: 'Mesclar (manter demais)', cls: 'btn-secondary', cb: () => {
+            label: 'Mesclar (manter demais)', cls: 'btn-secondary', cb: async () => {
               try {
-                downloadDaysBackup(existing, 'agenda_antes_importacao');
+                const accountKey = localKey();
+                const before = loadLocal();
+                await downloadDaysBackup(before, 'agenda_antes_importacao');
+                if (localKey() !== accountKey || JSON.stringify(loadLocal()) !== JSON.stringify(before)) throw new Error('Dados alterados durante o backup');
                 const now = Date.now();
                 const prepared = {};
                 Object.entries(imported).forEach(([key, day], index) => {
                   // A escolha explícita de importar prevalece sobre cópias antigas na nuvem.
                   prepared[key] = { ...day, updatedAt: new Date(now + index).toISOString() };
                 });
-                saveLocal({ ...existing, ...prepared });
+                saveLocal({ ...before, ...prepared });
                 refreshAll();
                 showToast(`${count} dias importados localmente. Confira os dados antes de sincronizar.`);
               } catch (err) {
