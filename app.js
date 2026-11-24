@@ -431,6 +431,15 @@ async function performCloudSync() {
       setSyncStatus('offline');
       return;
     }
+    const pendingEdits = JSON.parse(localStorage.getItem(localKey() + '_pendingEdits') || '{}');
+    for (const key of Object.keys(pendingEdits)) {
+      if (currentUser?.uid !== uid) return;
+      if (shouldDeferRemoteDay(key)) continue;
+      const day = loadLocal()[key];
+      if (!day) continue;
+      if (!await cloudSaveDay(key, day.content, day.tags, day.images, day.checklist)) return;
+    }
+    if (currentUser?.uid !== uid) return;
     const snap = await ref.get({ source: 'server' });
     if (currentUser?.uid !== uid) return;
     const local = loadLocal();
@@ -551,24 +560,37 @@ function shouldDeferRemoteDay(key) {
   return (pendingCloudWrites.get(key) || 0) > 0 || hasUnsavedEditorChanges(key);
 }
 async function cloudSaveDay(key, content, tags, images, checklist) {
-  if (!db || !currentUser) return;
+  if (!db || !currentUser) return false;
+  const queueKey = localKey() + '_pendingEdits';
+  const day = localGetDay(key);
+  const stamp = day.updatedAt;
+  const queue = JSON.parse(localStorage.getItem(queueKey) || '{}');
+  queue[key] = stamp;
+  localStorage.setItem(queueKey, JSON.stringify(queue));
   pendingCloudWrites.set(key, (pendingCloudWrites.get(key) || 0) + 1);
   try {
     setSyncStatus('syncing');
     await userDaysRef().doc(key).set({ 
-      content: content || '', 
-      title: localGetDay(key).title || '',
-      tags: tags || [], 
-      images: images || [], 
-      checklist: checklist || [], 
+      content: day.content || '', 
+      title: day.title || '',
+      tags: day.tags || [], 
+      images: day.images || [], 
+      checklist: day.checklist || [], 
       deleted: false,
-      updatedAt: new Date(localGetDay(key).updatedAt || Date.now())
+      updatedAt: new Date(stamp || Date.now())
     }, { merge: true });
-    setSyncStatus(pendingCloudWrites.size > 1 || (pendingCloudWrites.get(key) || 0) > 1 ? 'syncing' : 'synced');
+    const latest = JSON.parse(localStorage.getItem(queueKey) || '{}');
+    if (latest[key] === stamp) {
+      delete latest[key];
+      localStorage.setItem(queueKey, JSON.stringify(latest));
+    }
+    setSyncStatus(Object.keys(latest).length || pendingCloudWrites.size > 1 || (pendingCloudWrites.get(key) || 0) > 1 ? 'syncing' : 'synced');
+    return true;
   } catch (e) {
     console.error('cloudSaveDay error:', e);
     setSyncStatus('offline');
     showToast('Salvo neste dispositivo, mas não confirmado na nuvem. Faça backup antes de limpar os dados.', true);
+    return false;
   } finally {
     const remaining = (pendingCloudWrites.get(key) || 1) - 1;
     if (remaining > 0) pendingCloudWrites.set(key, remaining);
@@ -635,6 +657,12 @@ async function delDay(k) {
     const queue = JSON.parse(localStorage.getItem(queueKey) || '{}');
     queue[k] = new Date().toISOString();
     localStorage.setItem(queueKey, JSON.stringify(queue));
+  }
+  if (currentUser && FB_ON) {
+    const editKey = localKey() + '_pendingEdits';
+    const edits = JSON.parse(localStorage.getItem(editKey) || '{}');
+    delete edits[k];
+    localStorage.setItem(editKey, JSON.stringify(edits));
   }
   localDelDay(k);
   if (currentUser && FB_ON) return await cloudDeleteDay(k);
