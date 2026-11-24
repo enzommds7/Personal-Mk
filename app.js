@@ -52,7 +52,60 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 
 /* ────── Local Storage ────── */
 function localKey() { return currentUser ? `${SK}_${currentUser.uid}` : SK; }
+let primaryNotesSession = null;
+let primaryNotesAccount = null;
+let notesRepositoryModule;
+function primaryNotesEnabled(account = localKey()) {
+  return account !== SK && localStorage.getItem(account + '_indexeddb_primary') === '1';
+}
+function notesStorageReady() {
+  return !primaryNotesEnabled() || (primaryNotesAccount === localKey() && !!primaryNotesSession);
+}
+async function createPrimaryNotesRepository() {
+  notesRepositoryModule ||= await import('./src/storage/notes-repository.mjs');
+  return notesRepositoryModule.createNotesRepository({openDatabase: openNotesSnapshotDb, legacyStorage: localStorage});
+}
+async function initializePrimaryNotes() {
+  const account = localKey();
+  if (!primaryNotesEnabled(account)) return;
+  const repo = await createPrimaryNotesRepository();
+  const record = await repo.initialize(account);
+  if (localKey() !== account) throw new Error('Conta alterada durante inicialização');
+  primaryNotesSession = notesRepositoryModule.createNotesSession(repo, account, record);
+  primaryNotesAccount = account;
+}
+async function enablePrimaryNotes() {
+  if (!currentUser || primaryNotesEnabled()) return;
+  if (!window.confirm('Ativar IndexedDB experimental neste navegador? Feche outras abas e preserve o backup JSON. A cópia antiga será mantida.')) return;
+  const account = localKey();
+  const before = loadLocal();
+  try {
+    // Exportação e migração precedem a troca de fonte de dados.
+    await downloadDaysBackup(before, 'agenda_antes_indexeddb');
+    const repo = await createPrimaryNotesRepository();
+    const record = await repo.initialize(account);
+    const verified = await repo.read(account);
+    if (localKey() !== account || JSON.stringify(loadLocal()) !== JSON.stringify(before) ||
+        JSON.stringify(record.days) !== JSON.stringify(before) ||
+        JSON.stringify(verified) !== JSON.stringify(record)) {
+      throw new Error('Dados alterados ou diferentes da cópia migrada');
+    }
+    const session = notesRepositoryModule.createNotesSession(repo, account, verified);
+    localStorage.setItem(account + '_indexeddb_primary', '1');
+    primaryNotesAccount = account;
+    primaryNotesSession = session;
+    showToast('IndexedDB ativado neste navegador. A cópia antiga foi preservada.');
+    refreshAll();
+  } catch (error) {
+    console.error('Ativação IndexedDB cancelada:', error);
+    showToast('Ativação não concluída. A cópia original foi preservada.', true);
+  }
+}
 function loadLocal() {
+  if (primaryNotesEnabled()) {
+    if (!notesStorageReady()) throw new Error('IndexedDB principal ainda não disponível');
+    return primaryNotesSession.read();
+  }
   const raw = localStorage.getItem(localKey());
   if (raw === null) return {};
   try {
@@ -68,8 +121,13 @@ function loadLocal() {
     throw new Error('Não foi possível ler as anotações locais. Preserve os dados do navegador e restaure o backup JSON antes de continuar.', { cause: error });
   }
 }
-function saveLocal(d) {
+async function saveLocal(d) {
   try {
+    if (primaryNotesEnabled()) {
+      if (!notesStorageReady()) throw new Error('IndexedDB principal indisponível');
+      await primaryNotesSession.save(d);
+      return;
+    }
     localStorage.setItem(localKey(), JSON.stringify(d));
     // Espelho assíncrono: não altera o formato do backup nem remove a cópia original.
     void snapshotCurrentNotes().catch(error => console.warn('Backup adicional no IndexedDB não confirmado:', error));
@@ -86,7 +144,7 @@ function saveLocal(d) {
   }
 }
 function localGetDay(k) { return loadLocal()[k] || { content: '', updatedAt: null, tags: [], images: [], checklist: [] }; }
-function localSetDay(k, content, tags, images, checklist, title) {
+async function localSetDay(k, content, tags, images, checklist, title) {
   const d = loadLocal();
   const existingImages = d[k] && Array.isArray(d[k].images) ? d[k].images : [];
   const existingChecklist = d[k] && Array.isArray(d[k].checklist) ? d[k].checklist : [];
@@ -99,9 +157,9 @@ function localSetDay(k, content, tags, images, checklist, title) {
     checklist: checklist !== undefined ? checklist : existingChecklist,
     title: typeof title === 'string' ? title : existingTitle
   };
-  saveLocal(d);
+  await saveLocal(d);
 }
-function localDelDay(k) { const d = loadLocal(); delete d[k]; saveLocal(d); }
+async function localDelDay(k) { const d = loadLocal(); delete d[k]; await saveLocal(d); }
 function allKeys() { return Object.keys(loadLocal()).sort().reverse(); }
 
 /* ────── IndexedDB snapshot (non-destructive migration stage) ────── */
@@ -323,7 +381,7 @@ async function mergeRemoteDay(key, remoteDoc, accountKey) {
   const latest = loadLocal();
   if (JSON.stringify(latest[key]) !== JSON.stringify(original)) return false;
   latest[key] = {...original, ...remoteDoc};
-  saveLocal(latest);
+  await saveLocal(latest);
   return true;
 }
 
@@ -349,7 +407,7 @@ function applyRemoteEditorUpdate(local, activeTabChanged) {
 }
 
 function startRealtimeSync() {
-  if (!db || !currentUser || !FB_ON) return;
+  if (!db || !currentUser || !FB_ON || !notesStorageReady()) return;
   if (realtimeUnsubscribe) {
     try { realtimeUnsubscribe(); } catch (e) {}
     realtimeUnsubscribe = null;
@@ -384,7 +442,7 @@ function startRealtimeSync() {
             const locTime = local[key].updatedAt ? new Date(local[key].updatedAt).getTime() : 0;
             if (change.type === 'removed' || !locTime || remTime >= locTime) {
               delete local[key];
-              saveLocal(local);
+              await saveLocal(local);
               hasChanges = true;
               if (activeTab === key) activeTabChanged = true;
             }
@@ -426,7 +484,7 @@ function startRealtimeSync() {
 // Evita que eventos de foco, rede e inicialização iniciem merges simultâneos.
 let cloudSyncInFlight = null;
 function checkAndSyncCloud() {
-  if (!currentUser || !FB_ON) return Promise.resolve();
+  if (!currentUser || !FB_ON || !notesStorageReady()) return Promise.resolve();
   if (cloudSyncInFlight) return cloudSyncInFlight;
   const operation = performCloudSync();
   cloudSyncInFlight = operation;
@@ -489,7 +547,7 @@ async function performCloudSync() {
           const locTime = local[doc.id].updatedAt ? new Date(local[doc.id].updatedAt).getTime() : 0;
           if (!locTime || remTime >= locTime) {
             delete local[doc.id];
-            saveLocal(local);
+            await saveLocal(local);
             hasChanges = true;
             if (activeTab === doc.id) activeTabChanged = true;
           }
@@ -696,7 +754,9 @@ async function cloudLoadAll() {
 /* ────── Combined get/set (local + cloud) ────── */
 async function getDay(k) { return localGetDay(k); }
 async function setDay(k, content, tags, images, checklist, title) {
-  localSetDay(k, content, tags, images, checklist, title);
+  const account = localKey();
+  await localSetDay(k, content, tags, images, checklist, title);
+  if (account !== localKey()) return false;
   if (currentUser && FB_ON) {
     const queueKey = localKey() + '_pendingDeletes';
     const queue = JSON.parse(localStorage.getItem(queueKey) || '{}');
@@ -722,7 +782,9 @@ async function delDay(k) {
     delete edits[k];
     localStorage.setItem(editKey, JSON.stringify(edits));
   }
-  localDelDay(k);
+  const account = localKey();
+  await localDelDay(k);
+  if (account !== localKey()) return false;
   if (currentUser && FB_ON) return await cloudDeleteDay(k);
 }
 
@@ -860,6 +922,12 @@ function checkTimeCapsule(key) {
 /* ────── Settings ────── */
 function openSettings() {
   const isCloud = !!(currentUser && !currentUser.isAnonymous && FB_ON);
+  const primaryButton = $('settingsPrimaryNotesBtn');
+  if (primaryButton) {
+    primaryButton.hidden = !isCloud;
+    primaryButton.disabled = primaryNotesEnabled();
+    primaryButton.textContent = primaryNotesEnabled() ? 'IndexedDB principal ativo (experimental)' : 'Testar armazenamento IndexedDB';
+  }
   $('settingsAccountDesc').textContent = isCloud
     ? `Conectado: ${currentUser.email}`
     : (FB_ON ? 'Modo offline (sem conta)' : 'Firebase não configurado');
@@ -2051,7 +2119,8 @@ function renderTabs() {
 
 function openTab(key) {
   const d = loadLocal();
-  if (!d[key]) { d[key] = { content: '', updatedAt: null, tags: [], images: [], checklist: [] }; saveLocal(d); }
+  // Um dia vazio no IndexedDB só vira anotação ao receber uma edição.
+  if (!d[key] && !primaryNotesEnabled()) { d[key] = { content: '', updatedAt: null, tags: [], images: [], checklist: [] }; void saveLocal(d).catch(console.error); }
   if (!openTabs.includes(key)) openTabs.push(key);
   activateTab(key);
 }
@@ -2607,7 +2676,7 @@ async function showConflictHistory() {
         await downloadDaysBackup(before, 'agenda_antes_recuperacao');
         if (localKey() !== accountKey || JSON.stringify(loadLocal()) !== JSON.stringify(before)) throw new Error('Dados alterados durante o backup');
         const restored = { ...entry.day, updatedAt: new Date().toISOString() };
-        saveLocal({ ...before, [entry.key]: restored });
+        await saveLocal({ ...before, [entry.key]: restored });
         closeModal();
         refreshAll();
         // O envio para a nuvem fica a cargo do fluxo de sincronização existente.
@@ -2637,6 +2706,17 @@ function installConflictHistoryButton() {
   anchor.insertAdjacentElement('afterend', button);
 }
 installConflictHistoryButton();
+(function installPrimaryNotesButton() {
+  const anchor = $('settingsRestoreBtn');
+  if (!anchor) return;
+  const button = document.createElement('button');
+  button.id = 'settingsPrimaryNotesBtn';
+  button.type = 'button';
+  button.className = anchor.className;
+  button.textContent = 'Testar armazenamento IndexedDB';
+  button.addEventListener('click', () => { closeSettings(); void enablePrimaryNotes(); });
+  anchor.insertAdjacentElement('afterend', button);
+})();
 
 /* ────── Backup / Restore ────── */
 async function downloadDaysBackup(days, prefix = 'agenda_backup') {
@@ -2726,7 +2806,7 @@ $('restoreFileInput').addEventListener('change', e => {
                   // A escolha explícita de importar prevalece sobre cópias antigas na nuvem.
                   prepared[key] = { ...day, updatedAt: new Date(now + index).toISOString() };
                 });
-                saveLocal({ ...before, ...prepared });
+                await saveLocal({ ...before, ...prepared });
                 refreshAll();
                 showToast(`${count} dias importados localmente. Confira os dados antes de sincronizar.`);
               } catch (err) {
@@ -3375,6 +3455,7 @@ function timeToMins(t) {
 }
 
 function checkReminders() {
+  if (!notesStorageReady()) return;
   const k = todayKey();
   const isActive = activeTab === k;
   // Funciona mesmo se o usuário estiver com outra anotação aberta
@@ -4007,8 +4088,19 @@ function initDailyExtras() {
 
 /* ────── App init (after auth) ────── */
 async function initApp() {
+  const account = localKey();
+  if (primaryNotesEnabled(account)) {
+    try { await initializePrimaryNotes(); }
+    catch (error) {
+      console.error('IndexedDB principal não inicializado:', error);
+      showToast('Não foi possível abrir o IndexedDB. Preserve os dados e recarregue a página.', true);
+      setSyncStatus('offline');
+      return;
+    }
+  }
+  if (localKey() !== account) return;
   // Recover only the active account's missing dataset, before cloud listeners run.
-  try { await restoreMissingLocalNotesFromSnapshot(); }
+  try { if (!primaryNotesEnabled()) await restoreMissingLocalNotesFromSnapshot(); }
   catch (error) { console.warn('Recuperação do IndexedDB indisponível:', error); }
   updateUserBar();
   // If cloud user, start realtime sync and fetch data with safety timeout
@@ -4023,6 +4115,7 @@ async function initApp() {
       console.warn('Cloud sync timeout/warning on init:', e);
     }
   }
+  if (localKey() !== account) return;
   refreshAll();
   const today = todayKey();
   const data = loadLocal();
