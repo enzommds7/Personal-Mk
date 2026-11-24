@@ -237,7 +237,12 @@ function userDaysRef() { return db.collection('users').doc(currentUser.uid).coll
 let realtimeUnsubscribe = null;
 let isApplyingRemoteChange = false;
 
+let lastSyncReport = null;
+let syncFailureCodes = new Map();
 function setSyncStatus(state) {
+  const mode = $('userMode');
+  if (mode && currentUser) mode.textContent = state === 'synced' ? 'Sincronizado na nuvem' :
+    state === 'syncing' ? 'Verificando sincronização...' : 'Nuvem não confirmada';
   const bar = $('syncBar'); const txt = $('syncText');
   if (bar && txt) {
     bar.className = 'sync-bar ' + state;
@@ -497,6 +502,35 @@ function checkAndSyncCloud() {
   return operation;
 }
 
+// Comparar conteúdo, não apenas a quantidade ou o login da conta.
+function compareSyncDatasets(local, remote) {
+  const l = Object.entries(local).filter(([,day]) => hasRealContent(day));
+  const r = Object.entries(remote).filter(([,day]) => !day.deleted && hasRealContent(day));
+  const localKeys = new Set(l.map(([key]) => key));
+  const remoteKeys = new Set(r.map(([key]) => key));
+  return {
+    local: l.length, remote: r.length,
+    missingRemote: l.filter(([key]) => !remoteKeys.has(key)).length,
+    missingLocal: r.filter(([key]) => !localKeys.has(key)).length,
+    different: l.filter(([key,day]) => remoteKeys.has(key) && dayDiffers(day, remote[key])).length
+  };
+}
+async function manualSyncReport() {
+  if (!currentUser || !notesStorageReady()) return;
+  const uid = currentUser.uid;
+  await checkAndSyncCloud();
+  if (currentUser?.uid !== uid) return;
+  const report = lastSyncReport;
+  const codes = [...new Set(syncFailureCodes.values())].join(', ');
+  openModal({
+    title: 'Diagnóstico da sincronização',
+    body: report && report.uid === uid
+      ? `Com conteúdo neste dispositivo: ${report.local}. No servidor: ${report.remote}. Faltam na nuvem: ${report.missingRemote}. Faltam neste dispositivo: ${report.missingLocal}. Conteúdo diferente: ${report.different}. Operações pendentes: ${report.pending}. ${codes ? 'Falhas: ' + codes + '.' : ''}`
+      : `Não foi possível confirmar os dados no servidor. ${codes || 'Verifique a conexão e tente novamente.'}`,
+    actions: [{label:'Fechar',cls:'btn-cancel'}]
+  });
+}
+
 async function performCloudSync() {
   if (!currentUser || !FB_ON) return;
   try {
@@ -504,17 +538,17 @@ async function performCloudSync() {
     const uid = currentUser.uid;
     const accountKey = localKey();
     const ref = userDaysRef();
-    await updateConflictHistory(accountKey);
+    lastSyncReport = null;
+    syncFailureCodes = new Map();
+    // A migração do histórico não deve impedir a leitura de outras notas.
+    try { await updateConflictHistory(accountKey); } catch (error) { syncFailureCodes.set('history', error.code || 'histórico local indisponível'); }
     if (currentUser?.uid !== uid) return;
     const migrated = await migrateAnonymousToUserCache();
     if (currentUser?.uid !== uid) return;
     const pendingDeletes = JSON.parse(localStorage.getItem(localKey() + '_pendingDeletes') || '{}');
     const deleteResults = await Promise.all(Object.keys(pendingDeletes).map(key => cloudDeleteDay(key)));
     if (currentUser?.uid !== uid) return;
-    if (deleteResults.some(result => result !== true)) {
-      setSyncStatus('offline');
-      return;
-    }
+    if (deleteResults.some(result => result !== true)) syncFailureCodes.set('deletes', 'exclusões pendentes');
     const pendingEdits = JSON.parse(localStorage.getItem(localKey() + '_pendingEdits') || '{}');
     for (const key of Object.keys(pendingEdits)) {
       if (currentUser?.uid !== uid) return;
@@ -522,7 +556,7 @@ async function performCloudSync() {
       const day = loadLocal()[key];
       if (!day || hasPendingDelete(key)) continue;
       // Um conflito não pode impedir a sincronização das outras notas.
-      await cloudSaveDay(key);
+      try { await cloudSaveDay(key); } catch (error) { syncFailureCodes.set(key, error.code || 'falha no armazenamento local'); }
     }
     if (currentUser?.uid !== uid) return;
     const snap = await ref.get({ source: 'server' });
@@ -609,12 +643,25 @@ async function performCloudSync() {
     for (const key of uploadKeys) {
       if (currentUser?.uid !== uid) return;
       if (shouldDeferRemoteDay(key) || !loadLocal()[key]) continue;
-      await cloudSaveDay(key);
+      try { await cloudSaveDay(key); } catch (error) { syncFailureCodes.set(key, error.code || 'falha no armazenamento local'); }
     }
-    if (currentUser?.uid === uid) updateCloudSyncStatus();
+    if (currentUser?.uid !== uid) return;
+    // A segunda consulta confirma o resultado de todas as gravações.
+    const verified = await ref.get({source:'server'});
+    if (currentUser?.uid !== uid) return;
+    const actual = Object.create(null);
+    verified.forEach(doc => { actual[doc.id] = doc.data(); });
+    const report = compareSyncDatasets(loadLocal(), actual);
+    const pending = Object.keys(readPendingOperations('_pendingEdits')).length +
+      Object.keys(readPendingOperations('_pendingDeletes')).length;
+    lastSyncReport = {...report, pending, uid};
+    if (report.missingRemote || report.missingLocal || report.different || pending || syncFailureCodes.size) {
+      setSyncStatus('offline');
+    } else updateCloudSyncStatus();
 
   } catch (err) {
     console.warn('checkAndSyncCloud warning:', err);
+    syncFailureCodes.set('sync', err.code || 'falha na consulta ou no armazenamento');
     setSyncStatus('offline');
   }
 }
@@ -703,6 +750,7 @@ async function cloudSaveDay(key) {
     return true;
   } catch (e) {
     console.error('cloudSaveDay error:', e);
+    if (typeof syncFailureCodes !== 'undefined') syncFailureCodes.set(key, e.code || 'conflito ou falha de gravação');
     setSyncStatus('offline');
     showToast('Salvo neste dispositivo, mas não confirmado na nuvem. Faça backup antes de limpar os dados.', true);
     return false;
@@ -710,7 +758,10 @@ async function cloudSaveDay(key) {
     const remaining = (pendingCloudWrites.get(key) || 1) - 1;
     if (remaining > 0) pendingCloudWrites.set(key, remaining);
     else pendingCloudWrites.delete(key);
-    if (currentUser && FB_ON) updateCloudSyncStatus();
+    if (currentUser && FB_ON) {
+      // Uma gravação individual não prova a igualdade de toda a agenda.
+      setSyncStatus(pendingCloudWrites.size ? 'syncing' : 'offline');
+    }
   }
 }
 
@@ -743,10 +794,9 @@ async function cloudLoadAll() {
   if (!db || !currentUser) return null;
   try {
     setSyncStatus('syncing');
-    const snap = await userDaysRef().get();
+    const snap = await userDaysRef().get({source:'server'});
     const result = {};
     snap.forEach(doc => { result[doc.id] = { ...doc.data(), updatedAt: doc.data().updatedAt?.toDate?.()?.toISOString() || null }; });
-    setSyncStatus('synced');
     return result;
   } catch (e) { setSyncStatus('offline'); return null; }
 }
@@ -1184,7 +1234,7 @@ $('syncBar')?.addEventListener('click', () => {
   checkAndSyncCloud();
 });
 
-$('syncNowMenuBtn')?.addEventListener('click', () => {
+$('syncNowMenuBtn')?.addEventListener('click', async () => {
   closeUserPopover();
   if (!currentUser || !FB_ON) {
     if (FB_ON) showAuthScreen();
@@ -1192,7 +1242,7 @@ $('syncNowMenuBtn')?.addEventListener('click', () => {
     return;
   }
   showToast('Sincronizando conta com a nuvem...', '✓');
-  checkAndSyncCloud();
+  await manualSyncReport();
 });
 
 $('settingsMenuBtn')?.addEventListener('click', () => {
@@ -1263,14 +1313,14 @@ function updateUserBar() {
     const savedAvatar = localStorage.getItem('userAvatarBase64');
     if (savedAvatar) setAvatarVisual('<img src="' + savedAvatar + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">', true);
     else setAvatarVisual((email[0] || '?').toUpperCase(), false);
-    $('userMode').textContent = FB_ON ? 'Sincronizado na nuvem' : 'Modo local';
+    $('userMode').textContent = FB_ON ? 'Conta conectada · sincronização a verificar' : 'Modo local';
     if (syncMenuBtn) syncMenuBtn.style.display = '';
     if (lBtn) {
       lBtn.title = 'Sair da conta';
       lBtn.classList.add('danger');
       lBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span id="logoutBtnLabel">Sair da conta</span>';
     }
-    setSyncStatus('synced');
+    setSyncStatus('syncing');
   } else if (currentUser === null) {
     if (widget) widget.style.display = 'flex';
     $('userEmail').textContent = 'Modo offline';
