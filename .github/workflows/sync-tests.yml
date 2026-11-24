@@ -23,3 +23,5 @@ jobs:
         run: node --check app.js
       - name: Run synchronization regression tests
         run: node tests/sync-regression.cjs
+      - name: Run IndexedDB notes repository tests
+        run: node tests/notes-repository.mjs
