@@ -467,9 +467,9 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
       images: images || [], 
       checklist: checklist || [], 
       deleted: false,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp() 
+      updatedAt: new Date(localGetDay(key).updatedAt || Date.now())
     }, { merge: true });
-    setSyncStatus('synced');
+    setSyncStatus(pendingCloudWrites.size > 1 || (pendingCloudWrites.get(key) || 0) > 1 ? 'syncing' : 'synced');
   } catch (e) {
     console.error('cloudSaveDay error:', e);
     setSyncStatus('offline');
