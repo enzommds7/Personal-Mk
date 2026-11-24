@@ -105,7 +105,56 @@ async function runTransactionTests(source) {
   return count;
 }
 
+async function runConflictStorageTests(source) {
+  const start = source.indexOf('function combineConflictHistory(');
+  const end = source.indexOf('async function preserveConflictingDay(', start);
+  if (start < 0 || end < 0) throw new Error('Conflict storage helpers not found');
+  const first = {key:'2026-01-01',savedAt:'2026-01-02',day:{content:'original',images:['image-1']}};
+  const other = {...first,day:{...first.day,images:['image-2']}};
+  let count = 0;
+  function assert(value,message) {if (!value) throw new Error(message); count++;}
+  async function scenario({fail=false,modified=false}={}) {
+    const store = {'test_conflicts':JSON.stringify([first])};
+    let indexed = [first];
+    const localStorage = {
+      getItem:key=>store[key]??null,
+      removeItem:key=>{delete store[key];}
+    };
+    const db = {transaction:()=>{
+      const txn = {error:null,abort(){this.onabort?.();},objectStore(){
+        return {get(){
+          const req = {result:indexed};
+          Promise.resolve().then(()=>req.onsuccess());
+          return req;
+        },put(data){
+          Promise.resolve().then(()=>{
+            if(fail){txn.error=new Error('Simulated quota failure');txn.onerror();return;}
+            indexed=data;
+            if(modified)store.test_conflicts=JSON.stringify([first,other]);
+            txn.oncomplete();
+          });
+        }};
+      }};
+      return txn;
+    }};
+    const api = new Function('localStorage','openNotesSnapshotDb',
+      source.slice(start,end)+'\nreturn {combineConflictHistory,updateConflictHistory};'
+    )(localStorage,async()=>db);
+    let rejected=false;
+    try {await api.updateConflictHistory('test',[other]);}catch{rejected=true;}
+    return {legacy:store.test_conflicts,indexed,rejected,api};
+  }
+  const ok=await scenario();
+  assert(!ok.rejected && !ok.legacy,'Legacy history removed only after successful transaction');
+  assert(ok.indexed.length===2,'Migration deduplicates identical entries and preserves differing images');
+  const failed=await scenario({fail:true});
+  assert(failed.rejected && !!failed.legacy,'Failed transaction preserves legacy history');
+  const changed=await scenario({modified:true});
+  assert(!!changed.legacy,'Concurrent legacy change is not erased');
+  return count;
+}
+
 (async () => {
-  const total = runSyncTests(source) + await runTransactionTests(source);
+  const total = runSyncTests(source) + await runTransactionTests(source) + await runConflictStorageTests(source);
   console.log(total + ' sync regression checks passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
