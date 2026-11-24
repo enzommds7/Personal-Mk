@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {createNotesRepository, NotesRevisionConflict} from '../src/storage/notes-repository.mjs';
+import {createNotesRepository, NotesRevisionConflict, createNotesSession} from '../src/storage/notes-repository.mjs';
 
 // Minimal transaction simulation. Staged writes are committed only on completion.
 function fakeDatabase() {
@@ -87,3 +87,35 @@ await assert.rejects(repo.initialize('broken-account'));
 assert.equal(legacy.get('broken-account'), 'not JSON');
 await assert.rejects(repo.commit(key, 1, []), /Invalid notes dataset/);
 console.log('16 notes repository checks passed (simulated IndexedDB)');
+
+
+async function runSessionTests() {
+  const initial = {schema:1,revision:0,days:{'2026-01-01':{content:'a'}}};
+  let stored = JSON.parse(JSON.stringify(initial));
+  let fail = false;
+  const repo = {async commit(_account, rev, days) {
+    if (fail) throw Error('quota');
+    if (rev !== stored.revision) throw new NotesRevisionConflict();
+    stored = {schema:1,revision:rev+1,days:JSON.parse(JSON.stringify(days))};
+    return stored;
+  }};
+  const session=createNotesSession(repo,'account',initial);
+  const a=session.read();a['2026-01-01'].content='changed';
+  const b=session.read();b['2026-01-02']={content:'new'};
+  const one=session.save(a),two=session.save(b);
+  await Promise.all([one,two]);
+  if(session.read()['2026-01-01'].content!=='changed'||session.read()['2026-01-02'].content!=='new')throw Error('disjoint changes lost');
+  const first=session.read(),second=session.read();
+  first['2026-01-01'].content='first';second['2026-01-01'].content='second';
+  const p=session.save(first),q=session.save(second);
+  const outcomes=await Promise.allSettled([p,q]);
+  if(outcomes[0].status!=='fulfilled'||outcomes[1].status!=='rejected')throw Error('same-note concurrent write not rejected');
+  fail=true;
+  const old=session.read(),next=session.read();next['2026-01-01'].content='failed';
+  const failure=await Promise.allSettled([session.save(next)]);
+  if(failure[0].status!=='rejected'||JSON.stringify(old)!==JSON.stringify(session.read()))throw Error('uncommitted state became visible');
+  if(session.pending!==0)throw Error('pending leak');
+  return 4;
+}
+
+console.log(await runSessionTests() + ' notes session checks passed');
