@@ -425,8 +425,12 @@ async function performCloudSync() {
     const uid = currentUser.uid;
     const ref = userDaysRef();
     const pendingDeletes = JSON.parse(localStorage.getItem(localKey() + '_pendingDeletes') || '{}');
-    await Promise.all(Object.keys(pendingDeletes).map(key => cloudDeleteDay(key)));
+    const deleteResults = await Promise.all(Object.keys(pendingDeletes).map(key => cloudDeleteDay(key)));
     if (currentUser?.uid !== uid) return;
+    if (deleteResults.some(result => result !== true)) {
+      setSyncStatus('offline');
+      return;
+    }
     const snap = await ref.get({ source: 'server' });
     if (currentUser?.uid !== uid) return;
     const local = loadLocal();
@@ -573,12 +577,12 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
 }
 
 async function cloudDeleteDay(key) {
-  if (!db || !currentUser) return;
+  if (!db || !currentUser) return false;
   const queueKey = localKey() + '_pendingDeletes';
   try {
     const queue = JSON.parse(localStorage.getItem(queueKey) || '{}');
     const stamp = queue[key];
-    if (!stamp) return;
+    if (!stamp) return true;
     await userDaysRef().doc(key).set({
       deleted: true, content: '', title: '', tags: [], images: [], checklist: [],
       updatedAt: new Date(stamp)
@@ -588,10 +592,12 @@ async function cloudDeleteDay(key) {
       delete latest[key];
       localStorage.setItem(queueKey, JSON.stringify(latest));
     }
+    return true;
   } catch (e) {
     console.error('cloudDeleteDay error:', e);
     setSyncStatus('offline');
     showToast('Exclusão pendente de confirmação na nuvem.', true);
+    return false;
   }
 }
 
