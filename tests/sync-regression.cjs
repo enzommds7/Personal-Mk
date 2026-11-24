@@ -49,4 +49,63 @@ function runSyncTests(source) {
 }
 const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 new Function(source); // Parse browser script without executing its DOM initialization.
-console.log(runSyncTests(source) + ' sync regression checks passed');
+async function runTransactionTests(source) {
+  const start = source.indexOf('async function cloudSaveDay(');
+  const end = source.indexOf('async function cloudDeleteDay(', start);
+  if (start < 0 || end < 0) throw new Error('Cloud save not found');
+  const stamp = '2026-01-02T12:00:00.000Z';
+  let count = 0;
+  async function scenario({remote = null, fail = false, preserve = true, replacePending = false} = {}) {
+    const store = Object.create(null);
+    const day = {content:'local note', title:'', tags:[], images:[], checklist:[], updatedAt:stamp};
+    const writes = [];
+    const history = [];
+    const pending = new Map();
+    const localStorage = {
+      getItem: key => store[key] ?? null,
+      setItem: (key, value) => {store[key] = value;}
+    };
+    const db = {runTransaction: async callback => {
+      if (fail) throw new Error('offline simulation');
+      await callback({
+        get: async () => {
+          if (replacePending) store.test_pendingEdits = JSON.stringify({day:'new operation'});
+          return {exists: !!remote, data: () => remote};
+        },
+        set: (_ref, payload) => writes.push(payload)
+      });
+    }};
+    const fn = new Function(
+      'db','currentUser','FB_ON','hasPendingDelete','loadLocal','localKey','localGetDay',
+      'localStorage','pendingCloudWrites','setSyncStatus','userDaysRef','dayDiffers',
+      'preserveConflictingDay','showToast','updateCloudSyncStatus','console',
+      source.slice(start,end) + '\nreturn cloudSaveDay;'
+    )(db,{uid:'test'},true,()=>false,()=>({day}),()=> 'test',()=>day,
+      localStorage,pending,()=>{},()=>({doc:()=> 'ref'}),(a,b)=>a.content!==b.content,
+      (_key,value)=>{history.push(value);return preserve;},()=>{},()=>{}, {error:()=>{}});
+    const result = await fn('day');
+    if (pending.size !== 0) throw new Error('Write lock was not released');
+    return {result,writes,history,queued:JSON.parse(store.test_pendingEdits || '{}').day};
+  }
+  function assert(value,message) {if (!value) throw new Error(message); count++;}
+  const created = await scenario();
+  assert(created.result && created.writes.length === 1 && !created.queued,'Confirmed create clears queue');
+  const offline = await scenario({fail:true});
+  assert(!offline.result && offline.writes.length === 0 && offline.queued === stamp,'Network failure retains queue');
+  const newer = await scenario({remote:{content:'remote',updatedAt:'2026-01-03T12:00:00.000Z'}});
+  assert(!newer.result && !newer.writes.length && newer.queued === stamp,'Newer remote blocks overwrite');
+  const older = await scenario({remote:{content:'remote',updatedAt:'2026-01-01T12:00:00.000Z'}});
+  assert(older.result && older.history.length === 1 && older.writes.length === 1,'Older remote is preserved before replacement');
+  const quota = await scenario({remote:{content:'remote',updatedAt:'2026-01-01T12:00:00.000Z'},preserve:false});
+  assert(!quota.result && !quota.writes.length && quota.queued === stamp,'Failed conflict preservation prevents overwrite');
+  const deleted = await scenario({remote:{deleted:true,updatedAt:'2026-01-03T12:00:00.000Z'}});
+  assert(!deleted.result && !deleted.writes.length && deleted.queued === stamp,'Newer tombstone blocks resurrection');
+  const replaced = await scenario({replacePending:true});
+  assert(!replaced.result && !replaced.writes.length && replaced.queued === 'new operation','Superseded upload cannot clear newer operation');
+  return count;
+}
+
+(async () => {
+  const total = runSyncTests(source) + await runTransactionTests(source);
+  console.log(total + ' sync regression checks passed');
+})().catch(error => { console.error(error); process.exitCode = 1; });
