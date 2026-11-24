@@ -1,9 +1,10 @@
 // Cache apenas recursos estáticos. Dados pessoais ficam no armazenamento do app.
-const CACHE_NAME = 'personalmk-static-v23';
+const CACHE_NAME = 'personalmk-static-v24';
 const PRECACHE = [
   './index.html',
   './style.css?v=3.0',
   './app.js?v=3.0',
+  './src/storage/notes-repository.mjs',
   './icon.svg'
 ];
 const APP_PREFIXES = ['personalmk-static-', 'agenda-cache-'];
@@ -31,7 +32,7 @@ self.addEventListener('fetch', event => {
   // Não cachear APIs, endpoints dinâmicos nem caminhos desconhecidos.
   const path = url.pathname;
   const isNavigation = request.mode === 'navigate';
-  const isStatic = /\/(?:index\.html|app\.js|style\.css|icon\.svg)$/.test(path);
+  const isStatic = /\/(?:index\.html|app\.js|style\.css|icon\.svg|src\/storage\/notes-repository\.mjs)$/.test(path);
   if (!isNavigation && !isStatic) return;
 
   event.respondWith((async () => {
