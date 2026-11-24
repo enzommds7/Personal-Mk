@@ -424,6 +424,9 @@ async function performCloudSync() {
     const migrated = migrateAnonymousToUserCache();
     const uid = currentUser.uid;
     const ref = userDaysRef();
+    const pendingDeletes = JSON.parse(localStorage.getItem(localKey() + '_pendingDeletes') || '{}');
+    await Promise.all(Object.keys(pendingDeletes).map(key => cloudDeleteDay(key)));
+    if (currentUser?.uid !== uid) return;
     const snap = await ref.get({ source: 'server' });
     if (currentUser?.uid !== uid) return;
     const local = loadLocal();
@@ -539,6 +542,8 @@ function hasUnsavedEditorChanges(key) {
   );
 }
 function shouldDeferRemoteDay(key) {
+  const deletes = JSON.parse(localStorage.getItem(localKey() + '_pendingDeletes') || '{}');
+  if (deletes[key]) return true;
   return (pendingCloudWrites.get(key) || 0) > 0 || hasUnsavedEditorChanges(key);
 }
 async function cloudSaveDay(key, content, tags, images, checklist) {
@@ -569,20 +574,24 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
 
 async function cloudDeleteDay(key) {
   if (!db || !currentUser) return;
+  const queueKey = localKey() + '_pendingDeletes';
   try {
+    const queue = JSON.parse(localStorage.getItem(queueKey) || '{}');
+    const stamp = queue[key];
+    if (!stamp) return;
     await userDaysRef().doc(key).set({
-      deleted: true,
-      content: '',
-      title: '',
-      tags: [],
-      images: [],
-      checklist: [],
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      deleted: true, content: '', title: '', tags: [], images: [], checklist: [],
+      updatedAt: new Date(stamp)
     }, { merge: true });
+    const latest = JSON.parse(localStorage.getItem(queueKey) || '{}');
+    if (latest[key] === stamp) {
+      delete latest[key];
+      localStorage.setItem(queueKey, JSON.stringify(latest));
+    }
   } catch (e) {
     console.error('cloudDeleteDay error:', e);
     setSyncStatus('offline');
-    showToast('Exclusão salva localmente, mas não confirmada na nuvem.', true);
+    showToast('Exclusão pendente de confirmação na nuvem.', true);
   }
 }
 
@@ -602,13 +611,27 @@ async function cloudLoadAll() {
 async function getDay(k) { return localGetDay(k); }
 async function setDay(k, content, tags, images, checklist, title) {
   localSetDay(k, content, tags, images, checklist, title);
-  // Aguarda a confirmação do Firestore; a gravação local já ocorreu acima.
-  if (currentUser) return await cloudSaveDay(k, content, tags, images, checklist);
-  return false; // Sem sessão: apenas persistência local confirmada.
+  if (currentUser && FB_ON) {
+    const queueKey = localKey() + '_pendingDeletes';
+    const queue = JSON.parse(localStorage.getItem(queueKey) || '{}');
+    if (queue[k]) {
+      delete queue[k];
+      localStorage.setItem(queueKey, JSON.stringify(queue));
+    }
+  }
+  if (currentUser && FB_ON) return await cloudSaveDay(k, content, tags, images, checklist);
+  return false;
 }
 async function delDay(k) {
+  if (currentUser && FB_ON) {
+    // Registrar a intenção antes de remover a nota local.
+    const queueKey = localKey() + '_pendingDeletes';
+    const queue = JSON.parse(localStorage.getItem(queueKey) || '{}');
+    queue[k] = new Date().toISOString();
+    localStorage.setItem(queueKey, JSON.stringify(queue));
+  }
   localDelDay(k);
-  if (currentUser) return await cloudDeleteDay(k);
+  if (currentUser && FB_ON) return await cloudDeleteDay(k);
 }
 
 /* ────── Theme ────── */
