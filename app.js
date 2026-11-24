@@ -434,10 +434,11 @@ async function performCloudSync() {
     const pendingEdits = JSON.parse(localStorage.getItem(localKey() + '_pendingEdits') || '{}');
     for (const key of Object.keys(pendingEdits)) {
       if (currentUser?.uid !== uid) return;
-      if (shouldDeferRemoteDay(key)) continue;
+      if (isDayBusy(key)) continue;
       const day = loadLocal()[key];
-      if (!day) continue;
-      if (!await cloudSaveDay(key, day.content, day.tags, day.images, day.checklist)) return;
+      if (!day || hasPendingDelete(key)) continue;
+      // Um conflito não pode impedir a sincronização das outras notas.
+      await cloudSaveDay(key);
     }
     if (currentUser?.uid !== uid) return;
     const snap = await ref.get({ source: 'server' });
@@ -492,7 +493,7 @@ async function performCloudSync() {
     }
 
     // Upload local notes missing from Firestore or newer than Firestore
-    const uploadPromises = [];
+    const uploadKeys = [];
     Object.entries(local).forEach(([key, localDoc]) => {
       if (!hasRealContent(localDoc) || shouldDeferRemoteDay(key)) return;
       const rem = remoteDocs[key];
@@ -513,33 +514,18 @@ async function performCloudSync() {
       }
 
       if (shouldUpload) {
-        uploadPromises.push(
-          ref.doc(key).set({
-            content: localDoc.content || '',
-            title: localDoc.title || '',
-            tags: localDoc.tags || [],
-            images: localDoc.images || [],
-            checklist: localDoc.checklist || [],
-            deleted: false,
-            updatedAt: localDoc.updatedAt ? new Date(localDoc.updatedAt) : firebase.firestore.FieldValue.serverTimestamp()
-          }, { merge: true })
-        );
+        uploadKeys.push(key);
       }
     });
 
-    if (uploadPromises.length > 0) {
-      // Promise.allSettled não lança erro: rejeições precisam ser verificadas.
-      const uploadResults = await Promise.allSettled(uploadPromises);
-      const failures = uploadResults.filter(result => result.status === 'rejected');
-      if (failures.length) {
-        console.warn('Falha ao enviar anotações para a nuvem:', failures.length, failures[0].reason);
-        setSyncStatus('offline');
-        showToast('Algumas anotações ficaram somente neste dispositivo. Exporte um backup antes de limpar dados.', true);
-        return;
-      }
+    // Envio inicial, importações e reenvios passam pela mesma proteção transacional.
+    for (const key of uploadKeys) {
+      if (currentUser?.uid !== uid) return;
+      if (shouldDeferRemoteDay(key) || !loadLocal()[key]) continue;
+      await cloudSaveDay(key);
     }
+    if (currentUser?.uid === uid) updateCloudSyncStatus();
 
-    if (currentUser?.uid === uid) setSyncStatus(pendingCloudWrites.size ? 'syncing' : 'synced');
   } catch (err) {
     console.warn('checkAndSyncCloud warning:', err);
     setSyncStatus('offline');
@@ -554,13 +540,30 @@ function hasUnsavedEditorChanges(key) {
     document.activeElement === $('noteTitle')
   );
 }
-function shouldDeferRemoteDay(key) {
-  const deletes = JSON.parse(localStorage.getItem(localKey() + '_pendingDeletes') || '{}');
-  if (deletes[key]) return true;
+function readPendingOperations(kind) {
+  const value = JSON.parse(localStorage.getItem(localKey() + kind) || '{}');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Fila de sincronização inválida: ' + kind);
+  }
+  return value;
+}
+function hasPendingDelete(key) {
+  return Object.prototype.hasOwnProperty.call(readPendingOperations('_pendingDeletes'), key);
+}
+function isDayBusy(key) {
   return (pendingCloudWrites.get(key) || 0) > 0 || hasUnsavedEditorChanges(key);
 }
-async function cloudSaveDay(key, content, tags, images, checklist) {
-  if (!db || !currentUser) return false;
+function shouldDeferRemoteDay(key) {
+  return isDayBusy(key) || hasPendingDelete(key) ||
+    Object.prototype.hasOwnProperty.call(readPendingOperations('_pendingEdits'), key);
+}
+function updateCloudSyncStatus() {
+  const pending = Object.keys(readPendingOperations('_pendingEdits')).length +
+    Object.keys(readPendingOperations('_pendingDeletes')).length;
+  setSyncStatus(pendingCloudWrites.size ? 'syncing' : pending ? 'offline' : 'synced');
+}
+async function cloudSaveDay(key) {
+  if (!db || !currentUser || hasPendingDelete(key) || !loadLocal()[key]) return false;
   const queueKey = localKey() + '_pendingEdits';
   const day = localGetDay(key);
   const stamp = day.updatedAt;
@@ -609,7 +612,7 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
       delete latest[key];
       localStorage.setItem(queueKey, JSON.stringify(latest));
     }
-    setSyncStatus(Object.keys(latest).length || pendingCloudWrites.size > 1 || (pendingCloudWrites.get(key) || 0) > 1 ? 'syncing' : 'synced');
+    // Status é calculado depois de liberar a gravação em andamento.
     return true;
   } catch (e) {
     console.error('cloudSaveDay error:', e);
@@ -620,6 +623,7 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
     const remaining = (pendingCloudWrites.get(key) || 1) - 1;
     if (remaining > 0) pendingCloudWrites.set(key, remaining);
     else pendingCloudWrites.delete(key);
+    if (currentUser && FB_ON) updateCloudSyncStatus();
   }
 }
 
@@ -672,7 +676,7 @@ async function setDay(k, content, tags, images, checklist, title) {
       localStorage.setItem(queueKey, JSON.stringify(queue));
     }
   }
-  if (currentUser && FB_ON) return await cloudSaveDay(k, content, tags, images, checklist);
+  if (currentUser && FB_ON) return await cloudSaveDay(k);
   return false;
 }
 async function delDay(k) {
