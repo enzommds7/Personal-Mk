@@ -260,7 +260,7 @@ function preserveConflictingDay(key, losingDoc) {
   try {
     const previous = JSON.parse(localStorage.getItem(historyKey) || '[]');
     const history = Array.isArray(previous) ? previous : [];
-    const fingerprint = JSON.stringify([key, losingDoc.updatedAt, losingDoc.content, losingDoc.title]);
+    const fingerprint = JSON.stringify([key, losingDoc.updatedAt, losingDoc.content, losingDoc.title, losingDoc.tags, losingDoc.images, losingDoc.checklist]);
     if (history.some(entry => entry.fingerprint === fingerprint)) return true;
     history.push({ key, savedAt: new Date().toISOString(), fingerprint, day: losingDoc });
     // Preserva os 30 conflitos mais recentes; backups JSON externos continuam necessários.
@@ -570,15 +570,40 @@ async function cloudSaveDay(key, content, tags, images, checklist) {
   pendingCloudWrites.set(key, (pendingCloudWrites.get(key) || 0) + 1);
   try {
     setSyncStatus('syncing');
-    await userDaysRef().doc(key).set({ 
-      content: day.content || '', 
+    const uid = currentUser.uid;
+    const ref = userDaysRef().doc(key);
+    const payload = {
+      content: day.content || '',
       title: day.title || '',
-      tags: day.tags || [], 
-      images: day.images || [], 
-      checklist: day.checklist || [], 
+      tags: day.tags || [],
+      images: day.images || [],
+      checklist: day.checklist || [],
       deleted: false,
       updatedAt: new Date(stamp || Date.now())
-    }, { merge: true });
+    };
+    // A transação relê a versão remota se outro dispositivo gravar durante o envio.
+    await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (currentUser?.uid !== uid) throw new Error('Conta alterada durante sincronização');
+      const pending = JSON.parse(localStorage.getItem(queueKey) || '{}');
+      if (pending[key] !== stamp) throw new Error('Edição substituída por operação mais recente');
+      if (snapshot.exists) {
+        const remote = snapshot.data();
+        const remoteStamp = remote.updatedAt?.toDate?.()?.toISOString() || remote.updatedAt || null;
+        if (remote.deleted && Date.parse(remoteStamp) >= Date.parse(stamp)) {
+          throw new Error('Exclusão remota concorrente: edição mantida localmente');
+        }
+        if (!remote.deleted && dayDiffers(day, remote)) {
+          if (!preserveConflictingDay(key, { ...remote, updatedAt: remoteStamp })) {
+            throw new Error('Não foi possível preservar a versão remota');
+          }
+          if (Date.parse(remoteStamp) > Date.parse(stamp)) {
+            throw new Error('Versão remota mais recente: edição mantida na fila');
+          }
+        }
+      }
+      transaction.set(ref, payload, { merge: true });
+    });
     const latest = JSON.parse(localStorage.getItem(queueKey) || '{}');
     if (latest[key] === stamp) {
       delete latest[key];
