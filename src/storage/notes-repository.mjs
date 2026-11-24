@@ -116,3 +116,35 @@ export function createNotesRepository({openDatabase, legacyStorage}) {
 
   return {initialize, read, commit};
 }
+
+
+// Synchronous view for existing UI readers, asynchronous durable writes.
+// Every queued change is based on the view the caller actually read.
+export function createNotesSession(repository, account, initialRecord) {
+  const clone = value => JSON.parse(JSON.stringify(value));
+  const same = (a,b) => JSON.stringify(a) === JSON.stringify(b);
+  let state = clone(initialRecord);
+  let tail = Promise.resolve();
+  let pending = 0;
+  function read() { return clone(state.days); }
+  function save(days) {
+    const before = read();
+    const desired = clone(validateDays(days));
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(desired)])]
+      .filter(key => !same(before[key], desired[key]));
+    pending++;
+    const operation = tail.catch(() => {}).then(async () => {
+      if (!keys.length) return;
+      const next = read();
+      for (const key of keys) {
+        if (!same(next[key], before[key])) throw new NotesRevisionConflict();
+        if (Object.prototype.hasOwnProperty.call(desired,key)) next[key] = desired[key];
+        else delete next[key];
+      }
+      state = await repository.commit(account, state.revision, next);
+    }).finally(() => { pending--; });
+    tail = operation;
+    return operation;
+  }
+  return {read, save, get pending() {return pending;}};
+}
