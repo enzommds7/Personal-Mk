@@ -143,6 +143,12 @@ function snapshotCurrentNotes() {
       throw new Error('Snapshot de anotações inválido');
     }
     await snapshotNotesToIndexedDB(key, data);
+    // A transaction completing is not enough for migration validation:
+    // verify that the complete dataset can be read back before trusting it.
+    const verified = await readNotesSnapshot(key);
+    if (JSON.stringify(verified) !== JSON.stringify(data)) {
+      throw new Error('Verificação da cópia IndexedDB falhou');
+    }
   });
   return notesSnapshotQueue;
 }
