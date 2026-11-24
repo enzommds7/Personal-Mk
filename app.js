@@ -336,7 +336,10 @@ async function performCloudSync() {
   try {
     setSyncStatus('syncing');
     const migrated = migrateAnonymousToUserCache();
-    const snap = await userDaysRef().get();
+    const uid = currentUser.uid;
+    const ref = userDaysRef();
+    const snap = await ref.get({ source: 'server' });
+    if (currentUser?.uid !== uid) return;
     const local = loadLocal();
     const remoteDocs = {};
     let hasChanges = migrated;
@@ -344,6 +347,10 @@ async function performCloudSync() {
 
     snap.forEach(doc => {
       const raw = doc.data();
+      if (shouldDeferRemoteDay(doc.id)) {
+        remoteDocs[doc.id] = { deferred: true };
+        return;
+      }
       const updIso = raw.updatedAt?.toDate?.()?.toISOString() || raw.updatedAt || null;
       if (raw.deleted) {
         const remTime = updIso ? new Date(updIso).getTime() : 0;
@@ -374,11 +381,20 @@ async function performCloudSync() {
       }
     });
 
+    if (hasChanges) {
+      saveLocal(local);
+      renderSidebar($('searchInput')?.value || '');
+      renderTagFilterBar();
+      renderCalendar();
+      applyRemoteEditorUpdate(local, activeTabChanged);
+    }
+
     // Upload local notes missing from Firestore or newer than Firestore
     const uploadPromises = [];
     Object.entries(local).forEach(([key, localDoc]) => {
-      if (!hasRealContent(localDoc)) return;
+      if (!hasRealContent(localDoc) || shouldDeferRemoteDay(key)) return;
       const rem = remoteDocs[key];
+      if (rem?.deferred) return;
       const localTime = localDoc.updatedAt ? new Date(localDoc.updatedAt).getTime() : 0;
       let shouldUpload = false;
 
@@ -396,7 +412,7 @@ async function performCloudSync() {
 
       if (shouldUpload) {
         uploadPromises.push(
-          userDaysRef().doc(key).set({
+          ref.doc(key).set({
             content: localDoc.content || '',
             title: localDoc.title || '',
             tags: localDoc.tags || [],
@@ -421,14 +437,7 @@ async function performCloudSync() {
       }
     }
 
-    if (hasChanges) {
-      saveLocal(local);
-      renderSidebar($('searchInput')?.value || '');
-      renderTagFilterBar();
-      renderCalendar();
-      applyRemoteEditorUpdate(local, activeTabChanged);
-    }
-    setSyncStatus('synced');
+    if (currentUser?.uid === uid) setSyncStatus(pendingCloudWrites.size ? 'syncing' : 'synced');
   } catch (err) {
     console.warn('checkAndSyncCloud warning:', err);
     setSyncStatus('offline');
