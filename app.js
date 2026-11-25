@@ -543,21 +543,9 @@ async function performCloudSync() {
     // A migração do histórico não deve impedir a leitura de outras notas.
     try { await updateConflictHistory(accountKey); } catch (error) { syncFailureCodes.set('history', error.code || 'histórico local indisponível'); }
     if (currentUser?.uid !== uid) return;
-    const migrated = await migrateAnonymousToUserCache();
-    if (currentUser?.uid !== uid) return;
-    const pendingDeletes = JSON.parse(localStorage.getItem(localKey() + '_pendingDeletes') || '{}');
-    const deleteResults = await Promise.all(Object.keys(pendingDeletes).map(key => cloudDeleteDay(key)));
-    if (currentUser?.uid !== uid) return;
-    if (deleteResults.some(result => result !== true)) syncFailureCodes.set('deletes', 'exclusões pendentes');
-    const pendingEdits = JSON.parse(localStorage.getItem(localKey() + '_pendingEdits') || '{}');
-    for (const key of Object.keys(pendingEdits)) {
-      if (currentUser?.uid !== uid) return;
-      if (isDayBusy(key)) continue;
-      const day = loadLocal()[key];
-      if (!day || hasPendingDelete(key)) continue;
-      // Um conflito não pode impedir a sincronização das outras notas.
-      try { await cloudSaveDay(key); } catch (error) { syncFailureCodes.set(key, error.code || 'falha no armazenamento local'); }
-    }
+    let migrated = false;
+    try { migrated = await migrateAnonymousToUserCache(); }
+    catch (error) { syncFailureCodes.set('migration', error.code || 'migração local não concluída'); }
     if (currentUser?.uid !== uid) return;
     const snap = await ref.get({ source: 'server' });
     if (currentUser?.uid !== uid) return;
@@ -580,10 +568,20 @@ async function performCloudSync() {
         if (local[doc.id]) {
           const locTime = local[doc.id].updatedAt ? new Date(local[doc.id].updatedAt).getTime() : 0;
           if (!locTime || remTime >= locTime) {
-            delete local[doc.id];
-            await saveLocal(local);
-            hasChanges = true;
-            if (activeTab === doc.id) activeTabChanged = true;
+            const original = local[doc.id];
+            try {
+              if (hasRealContent(original) && !await preserveConflictingDay(doc.id, original)) {
+                syncFailureCodes.set(doc.id, 'sync/history-unavailable');
+                continue;
+              }
+              if (currentUser?.uid !== uid || shouldDeferRemoteDay(doc.id)) continue;
+              const latest = loadLocal();
+              if (JSON.stringify(latest[doc.id]) !== JSON.stringify(original)) continue;
+              delete latest[doc.id];
+              await saveLocal(latest);
+              hasChanges = true;
+              if (activeTab === doc.id) activeTabChanged = true;
+            } catch (error) { syncFailureCodes.set(doc.id, error.code || 'falha ao aplicar exclusão remota'); }
           }
         }
         continue;
@@ -598,9 +596,13 @@ async function performCloudSync() {
         updatedAt: updIso
       };
       remoteDocs[doc.id] = remote;
-      if (await mergeRemoteDay(doc.id, remote, accountKey)) {
-        hasChanges = true;
-        if (activeTab === doc.id) activeTabChanged = true;
+      try {
+        if (await mergeRemoteDay(doc.id, remote, accountKey)) {
+          hasChanges = true;
+          if (activeTab === doc.id) activeTabChanged = true;
+        }
+      } catch (error) {
+        syncFailureCodes.set(doc.id, error.code || 'falha ao armazenar nota recebida');
       }
     }
 
@@ -613,7 +615,8 @@ async function performCloudSync() {
       applyRemoteEditorUpdate(local, activeTabChanged);
     }
 
-    // Upload local notes missing from Firestore or newer than Firestore
+    // Priorizar notas ausentes do servidor antes de reenvios conflitantes.
+    // Uma fila antiga não deve impedir que novas notas cheguem à nuvem.
     const uploadKeys = [];
     Object.entries(local).forEach(([key, localDoc]) => {
       if (!hasRealContent(localDoc) || shouldDeferRemoteDay(key)) return;
@@ -634,16 +637,37 @@ async function performCloudSync() {
         }
       }
 
-      if (shouldUpload) {
-        uploadKeys.push(key);
-      }
+      if (shouldUpload) uploadKeys.push({key, createOnly: !rem});
     });
 
-    // Envio inicial, importações e reenvios passam pela mesma proteção transacional.
-    for (const key of uploadKeys) {
+    // Os itens ausentes são independentes. Limitar a concorrência a 3 envios.
+    const ordered = uploadKeys.sort((a,b) => Number(b.createOnly) - Number(a.createOnly));
+    for (let i = 0; i < ordered.length; i += 3) {
       if (currentUser?.uid !== uid) return;
-      if (shouldDeferRemoteDay(key) || !loadLocal()[key]) continue;
-      try { await cloudSaveDay(key); } catch (error) { syncFailureCodes.set(key, error.code || 'falha no armazenamento local'); }
+      await Promise.allSettled(ordered.slice(i,i+3).map(async ({key,createOnly}) => {
+        if (currentUser?.uid !== uid) return;
+        try {
+          if (shouldDeferRemoteDay(key) || !loadLocal()[key]) return;
+          await cloudSaveDay(key, {createOnly});
+        } catch (error) { syncFailureCodes.set(key, error.code || 'falha no armazenamento local'); }
+      }));
+    }
+    if (currentUser?.uid !== uid) return;
+    // Só depois da leitura e das notas ausentes, tentar as operações pendentes.
+    const pendingEdits = readPendingOperations('_pendingEdits');
+    for (const key of Object.keys(pendingEdits)) {
+      if (currentUser?.uid !== uid) return;
+      if (syncFailureCodes.has(key)) continue;
+      try {
+        if (isDayBusy(key) || hasPendingDelete(key) || !loadLocal()[key]) continue;
+        await cloudSaveDay(key);
+      } catch (error) { syncFailureCodes.set(key, error.code || 'falha no reenvio'); }
+    }
+    if (currentUser?.uid !== uid) return;
+    const pendingDeletes = readPendingOperations('_pendingDeletes');
+    const deleteResults = await Promise.allSettled(Object.keys(pendingDeletes).map(key => cloudDeleteDay(key)));
+    if (deleteResults.some(result => result.status !== 'fulfilled' || result.value !== true)) {
+      syncFailureCodes.set('deletes', 'exclusões pendentes');
     }
     if (currentUser?.uid !== uid) return;
     // A segunda consulta confirma o resultado de todas as gravações.
@@ -696,7 +720,7 @@ function updateCloudSyncStatus() {
     Object.keys(readPendingOperations('_pendingDeletes')).length;
   setSyncStatus(pendingCloudWrites.size ? 'syncing' : pending ? 'offline' : 'synced');
 }
-async function cloudSaveDay(key) {
+async function cloudSaveDay(key, {createOnly = false} = {}) {
   if (!db || !currentUser || hasPendingDelete(key) || !loadLocal()[key]) return false;
   const queueKey = localKey() + '_pendingEdits';
   const day = localGetDay(key);
@@ -726,16 +750,19 @@ async function cloudSaveDay(key) {
       if (pending[key] !== stamp) throw new Error('Edição substituída por operação mais recente');
       if (snapshot.exists) {
         const remote = snapshot.data();
+        if (createOnly && (remote.deleted || dayDiffers(day, remote))) {
+          throw Object.assign(new Error('Nota criada ou alterada em outro dispositivo'), {code:'sync/remote-created'});
+        }
         const remoteStamp = remote.updatedAt?.toDate?.()?.toISOString() || remote.updatedAt || null;
         if (remote.deleted && Date.parse(remoteStamp) >= Date.parse(stamp)) {
-          throw new Error('Exclusão remota concorrente: edição mantida localmente');
+          throw Object.assign(new Error('Exclusão remota concorrente: edição mantida localmente'), {code:'sync/remote-deleted'});
         }
         if (!remote.deleted && dayDiffers(day, remote)) {
           if (!await preserveConflictingDay(key, { ...remote, updatedAt: remoteStamp })) {
-            throw new Error('Não foi possível preservar a versão remota');
+            throw Object.assign(new Error('Não foi possível preservar a versão remota'), {code:'sync/history-unavailable'});
           }
           if (Date.parse(remoteStamp) > Date.parse(stamp)) {
-            throw new Error('Versão remota mais recente: edição mantida na fila');
+            throw Object.assign(new Error('Versão remota mais recente: edição mantida na fila'), {code:'sync/remote-newer'});
           }
         }
       }
