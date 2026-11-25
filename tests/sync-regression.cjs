@@ -55,7 +55,7 @@ async function runTransactionTests(source) {
   if (start < 0 || end < 0) throw new Error('Cloud save not found');
   const stamp = '2026-01-02T12:00:00.000Z';
   let count = 0;
-  async function scenario({remote = null, fail = false, preserve = true, replacePending = false} = {}) {
+  async function scenario({remote = null, fail = false, preserve = true, replacePending = false, createOnly = false} = {}) {
     const store = Object.create(null);
     const day = {content:'local note', title:'', tags:[], images:[], checklist:[], updatedAt:stamp};
     const writes = [];
@@ -83,13 +83,19 @@ async function runTransactionTests(source) {
     )(db,{uid:'test'},true,()=>false,()=>({day}),()=> 'test',()=>day,
       localStorage,pending,()=>{},()=>({doc:()=> 'ref'}),(a,b)=>a.content!==b.content,
       (_key,value)=>{history.push(value);return preserve;},()=>{},()=>{}, {error:()=>{}});
-    const result = await fn('day');
+    const result = await fn('day', {createOnly});
     if (pending.size !== 0) throw new Error('Write lock was not released');
     return {result,writes,history,queued:JSON.parse(store.test_pendingEdits || '{}').day};
   }
   function assert(value,message) {if (!value) throw new Error(message); count++;}
   const created = await scenario();
   assert(created.result && created.writes.length === 1 && !created.queued,'Confirmed create clears queue');
+  const missing = await scenario({createOnly:true});
+  assert(missing.result && missing.writes.length === 1 && !missing.queued,'Missing remote note is created safely');
+  const concurrent = await scenario({createOnly:true,remote:{content:'concurrent',updatedAt:'2026-01-01T12:00:00.000Z'}});
+  assert(!concurrent.result && !concurrent.writes.length && concurrent.queued === stamp,'Create-only recovery does not overwrite a newly discovered remote note');
+  const tombstone = await scenario({createOnly:true,remote:{deleted:true,updatedAt:'2026-01-01T12:00:00.000Z'}});
+  assert(!tombstone.result && !tombstone.writes.length && tombstone.queued === stamp,'Create-only recovery does not revive a remote tombstone');
   const offline = await scenario({fail:true});
   assert(!offline.result && offline.writes.length === 0 && offline.queued === stamp,'Network failure retains queue');
   const newer = await scenario({remote:{content:'remote',updatedAt:'2026-01-03T12:00:00.000Z'}});
